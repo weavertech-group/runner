@@ -18,6 +18,22 @@ fail() {
   exit 55
 }
 
+install_uv() {
+  local uv_archive="$temporary_dir/uv.tar.gz"
+  local uv_dir="$temporary_dir/uv"
+
+  curl --fail --silent --show-error --location --retry 3 \
+    --proto '=https' --tlsv1.2 \
+    --output "$uv_archive" \
+    "https://releases.astral.sh/github/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz"
+  printf '%s  %s\n' "$UV_SHA256" "$uv_archive" | \
+    sha256sum --check --status
+  mkdir -p "$uv_dir"
+  tar -xzf "$uv_archive" --strip-components=1 -C "$uv_dir"
+  install -m 0755 "$uv_dir/uv" "$local_bin/uv"
+  install -m 0755 "$uv_dir/uvx" "$local_bin/uvx"
+}
+
 install_kubernetes_plugins() {
   local kubectx_archive="$temporary_dir/kubectx.tar.gz"
   local kubectx_dir="$temporary_dir/kubectx"
@@ -119,12 +135,7 @@ main() {
   sudo ln -sfn /usr/bin/batcat /usr/local/bin/bat
 
   install -d -m 0700 "$local_bin" "$temporary_dir" "$HOME/.config/mise"
-
-  curl --fail --silent --show-error --location --retry 3 \
-    --proto '=https' --tlsv1.2 \
-    --output "$temporary_dir/uv-installer.sh" \
-    "https://releases.astral.sh/github/uv/releases/download/${UV_VERSION}/uv-installer.sh"
-  UV_UNMANAGED_INSTALL="$local_bin" sh "$temporary_dir/uv-installer.sh"
+  install_uv
 
   curl --fail --silent --show-error --location --retry 3 \
     --proto '=https' --tlsv1.2 \
@@ -151,7 +162,12 @@ terraform = "${TERRAFORM_VERSION}"
 opentofu = "${OPENTOFU_VERSION}"
 EOF
   chmod 0600 "$mise_config"
-  MISE_YES=1 MISE_JOBS=2 mise install
+  MISE_YES=1 \
+    MISE_JOBS=2 \
+    MISE_GITHUB_ATTESTATIONS=true \
+    MISE_AQUA_GITHUB_ATTESTATIONS=true \
+    MISE_PYTHON_GITHUB_ATTESTATIONS=true \
+    mise install
   mise reshim
 
   npm install --global --no-audit --no-fund \
