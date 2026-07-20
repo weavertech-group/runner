@@ -13,6 +13,15 @@
     ]
   },
 
+  // Publish IPv6 MagicDNS records as well as IPv4. This avoids collisions
+  // when a local network also routes the CGNAT 100.64.0.0/10 range.
+  "nodeAttrs": [
+    {
+      "target": ["*"],
+      "attr": ["magicdns-aaaa"]
+    }
+  ],
+
   "grants": [
     // A non-empty grants array is default-deny. This rule preserves full
     // connectivity among administrator-owned personal devices. Add separate

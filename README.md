@@ -44,6 +44,11 @@ that must remain available. The example preserves full connectivity between
 members of `group:platform-admins`; add explicit CIDR destinations for any
 existing subnet routes.
 
+The policy example also enables the `magicdns-aaaa` node attribute. Keep this
+when the Headscale IPv6 pool is enabled: it lets MagicDNS clients use the
+tailnet IPv6 address if a local network incorrectly claims the CGNAT
+`100.64.0.0/10` range.
+
 Create a dedicated tagged, reusable, ephemeral, pre-authorized key. Confirm the
 flags against the installed version:
 
