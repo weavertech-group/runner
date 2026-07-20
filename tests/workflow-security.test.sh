@@ -120,15 +120,22 @@ grep -Fq 'node-version: 22.19.0' "$WORKFLOW" || \
   fail 'session Node runtime version is not fixed'
 grep -Fq 'run: npm install -g @openai/codex' "$WORKFLOW" || \
   fail 'Codex CLI is not installed for runner sessions'
+grep -Fq 'run: npm install -g @anthropic-ai/claude-code' "$WORKFLOW" || \
+  fail 'Claude Code is not installed for runner sessions'
 
 node_runtime_step="$(sed -n '/- name: Prepare Node runtime/,/- name: Install Codex CLI/p' "$WORKFLOW")"
 if grep -Fq 'if:' <<< "$node_runtime_step"; then
   fail 'Node runtime must be prepared for every valid runner session'
 fi
 
-codex_install_step="$(sed -n '/- name: Install Codex CLI/,/- name: Prepare network/p' "$WORKFLOW")"
+codex_install_step="$(sed -n '/- name: Install Codex CLI/,/- name: Install Claude Code/p' "$WORKFLOW")"
 if grep -Fq 'if:' <<< "$codex_install_step"; then
   fail 'Codex CLI must be installed for every valid runner session'
+fi
+
+claude_install_step="$(sed -n '/- name: Install Claude Code/,/- name: Prepare network/p' "$WORKFLOW")"
+if grep -Fq 'if:' <<< "$claude_install_step"; then
+  fail 'Claude Code must be installed for every valid runner session'
 fi
 
 grep -Fq 'bash scripts/install-cloudflared.sh' "$WORKFLOW" || \
