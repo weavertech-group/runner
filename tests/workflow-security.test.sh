@@ -6,6 +6,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKFLOW="$ROOT_DIR/.github/workflows/private-runner-session.yml"
 CONNECT_SCRIPT="$ROOT_DIR/scripts/connect-headscale.sh"
 ALLOWLIST="$ROOT_DIR/.github/target-repositories.txt"
+CLOUDFLARED_SCRIPT="$ROOT_DIR/scripts/install-cloudflared.sh"
+DEVSPACE_SCRIPT="$ROOT_DIR/scripts/start-devspace.sh"
+CLEANUP_SCRIPT="$ROOT_DIR/scripts/cleanup.sh"
 
 fail() {
   printf 'FAIL: %s\n' "$1" >&2
@@ -13,6 +16,8 @@ fail() {
 }
 
 [[ -f "$WORKFLOW" ]] || fail 'workflow is missing'
+[[ -f "$CLOUDFLARED_SCRIPT" ]] || fail 'cloudflared installer is missing'
+[[ -f "$DEVSPACE_SCRIPT" ]] || fail 'DevSpace launcher is missing'
 
 if grep -Eq 'uses: [^@]+@(main|master|v[0-9]+([.]?[0-9]+)*)$' "$WORKFLOW"; then
   fail 'third-party actions must be pinned to a full commit SHA'
@@ -90,5 +95,49 @@ grep -Fq -- '--accept-dns=false' "$CONNECT_SCRIPT" || \
 if grep -Eq 'HEADSCALE_MAGIC_DNS_DOMAIN|DNSName|runner-fqdn' "$CONNECT_SCRIPT"; then
   fail 'runner connection must not validate or persist MagicDNS names'
 fi
+
+grep -Fq 'enable_devspace:' "$WORKFLOW" || \
+  fail 'DevSpace must remain an explicit workflow opt-in'
+grep -Fq 'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020' "$WORKFLOW" || \
+  fail 'DevSpace Node runtime action is not pinned'
+grep -Fq 'node-version: 22.19.0' "$WORKFLOW" || \
+  fail 'DevSpace Node runtime version is not fixed'
+grep -Fq 'bash scripts/install-cloudflared.sh' "$WORKFLOW" || \
+  fail 'workflow does not install the pinned tunnel binary'
+grep -Fq 'bash scripts/start-devspace.sh' "$WORKFLOW" || \
+  fail 'workflow does not start DevSpace'
+
+if grep -Eq 'GITHUB_OUTPUT.*(MCP|DEVSPACE|OWNER|PUBLIC)' "$WORKFLOW"; then
+  fail 'DevSpace connection material must not use workflow outputs'
+fi
+
+grep -Fq "version='2026.7.2'" "$CLOUDFLARED_SCRIPT" || \
+  fail 'cloudflared version is not pinned'
+grep -Fq "sha256='ec905ea7b7e327ff8abdde8cb64697a2152de74dbcdbf6aec9db8364eb3886cd'" \
+  "$CLOUDFLARED_SCRIPT" || fail 'cloudflared checksum is not pinned'
+grep -Fq 'sha256sum --check --status' "$CLOUDFLARED_SCRIPT" || \
+  fail 'cloudflared download is not checksum verified'
+
+grep -Fq "devspace_package='@waishnav/devspace@1.0.4'" "$DEVSPACE_SCRIPT" || \
+  fail 'DevSpace package version is not pinned'
+grep -Fq 'DEVSPACE_ALLOWED_ROOTS="$workspace"' "$DEVSPACE_SCRIPT" || \
+  fail 'DevSpace filesystem scope is not restricted to the cloned workspace'
+grep -Fq 'DEVSPACE_SUBAGENTS=0' "$DEVSPACE_SCRIPT" || \
+  fail 'DevSpace subagents must be disabled by default'
+grep -Fq 'connection.txt' "$DEVSPACE_SCRIPT" || \
+  fail 'DevSpace connection material is not written locally'
+grep -Fq 'chmod 0600' "$DEVSPACE_SCRIPT" || \
+  fail 'DevSpace connection material does not receive private permissions'
+
+if grep -Eq '(^|[[:space:]])(set -x|printenv)([[:space:]]|$)' "$DEVSPACE_SCRIPT"; then
+  fail 'DevSpace launcher contains a command that can expose secrets'
+fi
+
+grep -Fq 'devspace.pid' "$CLEANUP_SCRIPT" || \
+  fail 'cleanup does not terminate DevSpace'
+grep -Fq 'cloudflared.pid' "$CLEANUP_SCRIPT" || \
+  fail 'cleanup does not terminate cloudflared'
+grep -Fq 'private-runner-session/devspace' "$CLEANUP_SCRIPT" || \
+  fail 'cleanup does not remove local connection material'
 
 printf 'workflow security tests passed\n'
