@@ -115,9 +115,22 @@ fi
 grep -Fq 'enable_devspace:' "$WORKFLOW" || \
   fail 'DevSpace must remain an explicit workflow opt-in'
 grep -Fq 'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020' "$WORKFLOW" || \
-  fail 'DevSpace Node runtime action is not pinned'
+  fail 'session Node runtime action is not pinned'
 grep -Fq 'node-version: 22.19.0' "$WORKFLOW" || \
-  fail 'DevSpace Node runtime version is not fixed'
+  fail 'session Node runtime version is not fixed'
+grep -Fq 'run: npm install -g @openai/codex' "$WORKFLOW" || \
+  fail 'Codex CLI is not installed for runner sessions'
+
+node_runtime_step="$(sed -n '/- name: Prepare Node runtime/,/- name: Install Codex CLI/p' "$WORKFLOW")"
+if grep -Fq 'if:' <<< "$node_runtime_step"; then
+  fail 'Node runtime must be prepared for every valid runner session'
+fi
+
+codex_install_step="$(sed -n '/- name: Install Codex CLI/,/- name: Prepare network/p' "$WORKFLOW")"
+if grep -Fq 'if:' <<< "$codex_install_step"; then
+  fail 'Codex CLI must be installed for every valid runner session'
+fi
+
 grep -Fq 'bash scripts/install-cloudflared.sh' "$WORKFLOW" || \
   fail 'workflow does not install the pinned tunnel binary'
 grep -Fq 'bash scripts/start-devspace.sh' "$WORKFLOW" || \
