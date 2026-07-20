@@ -61,7 +61,10 @@ fi
 
 ready=false
 for _ in {1..40}; do
-  if sudo tailscale status >/dev/null 2>&1; then
+  # The plain-text command can return non-zero while the daemon is healthy but
+  # still logged out. JSON status is a local-API readiness probe and works
+  # before registration.
+  if sudo tailscale status --json >/dev/null 2>&1; then
     ready=true
     break
   fi

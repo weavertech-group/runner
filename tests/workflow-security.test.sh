@@ -67,4 +67,7 @@ if grep -Eq 'tailscaled([[:space:]\\]|$)' "$CONNECT_SCRIPT" && \
   fail 'background daemon startup must not use an asynchronous if condition'
 fi
 
+grep -Fq 'tailscale status --json' "$CONNECT_SCRIPT" || \
+  fail 'daemon readiness must work before the node is logged in'
+
 printf 'workflow security tests passed\n'
