@@ -85,13 +85,21 @@ jobs:
         with:
           node-version: 22.22.2
 
+      - name: Install development environment
+        shell: bash
+        run: bash scripts/setup-development-environment.sh
+
       - name: Install Codex CLI
         shell: bash
-        run: npm install -g @openai/codex
+        run: npm install -g @openai/codex@latest
 
       - name: Install Claude Code
         shell: bash
-        run: npm install -g @anthropic-ai/claude-code
+        run: npm install -g @anthropic-ai/claude-code@latest
+
+      - name: Verify development environment
+        shell: bash
+        run: bash scripts/verify-development-environment.sh
 
       - name: Prepare network
         if: ${{ inputs.enable_ssh }}
