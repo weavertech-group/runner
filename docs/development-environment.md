@@ -26,7 +26,7 @@ Pinned versions are declared in `scripts/development-versions.env`. The workflow
 
 The pinned environment includes:
 
-- Ubuntu 24.04 and Node.js 22.22.2
+- Ubuntu 24.04 and Node.js 22.23.1
 - Corepack, pnpm, and Yarn
 - uv and mise
 - Python, Go, and Rust
@@ -36,6 +36,8 @@ The pinned environment includes:
 - Kubernetes plugins `kubectl ctx`, `kubectl ns`, and `kubectl neat`
 
 Codex CLI and Claude Code are the deliberate exceptions. The workflow installs `@openai/codex@latest` and `@anthropic-ai/claude-code@latest` so every new session receives their current npm releases. This makes those two tools non-reproducible by design and keeps npm availability on the critical startup path.
+
+Downloaded uv and Kubernetes plugin archives are verified against pinned SHA-256 checksums. mise is installed from a versioned immutable release, and GitHub artifact-attestation verification is explicitly enabled for tool backends that support it.
 
 ## Project dependencies
 
