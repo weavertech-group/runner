@@ -8,6 +8,11 @@ one GitHub Environment without exposing the private repository name.
 The workflow is intentionally only a secure network/SSH handoff. It does not
 run issue agents, create pull requests, or implement a task queue.
 
+For repeatable setup, operation, validation, credential rotation, cleanup, and
+troubleshooting, use the privacy-safe
+[operations runbook](docs/runner-operations-runbook.md). This README describes
+the design invariants; the runbook is the authoritative operational procedure.
+
 ## What is implemented
 
 - Unique node name: `gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}`.
