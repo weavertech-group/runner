@@ -117,7 +117,7 @@ main() {
   curl --fail --silent --show-error --location --retry 3 \
     --proto '=https' --tlsv1.2 \
     --output "$temporary_dir/mise-installer.sh" \
-    https://mise.run
+    "https://github.com/jdx/mise/releases/download/${MISE_VERSION}/install.sh"
   MISE_VERSION="$MISE_VERSION" \
     MISE_INSTALL_PATH="$local_bin/mise" \
     MISE_QUIET=1 \
