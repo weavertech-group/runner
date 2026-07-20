@@ -158,12 +158,21 @@ On macOS workstations that run Quantumult X, use the Homebrew/open-source
 sudo tailscale set --accept-dns=false
 ```
 
-Connect through the Tailscale CLI. It resolves the node from the local
-Tailscale daemon and does not require macOS system DNS or an SSH config alias:
+On a workstation where Quantumult X excludes `100.64.0.0/10`, the excluded
+IPv4 route can take precedence over the open-source `tailscaled` route. Read
+the runner's IPv6 address from the local Tailscale netmap and connect without
+system DNS or an SSH config alias:
 
 ```bash
-tailscale ssh runner@gha-<run-id>-<run-attempt>
+node="gha-<run-id>-<run-attempt>"
+runner_ipv6="$(tailscale status --json | jq -er --arg node "$node" \
+  '[.Peer[] | select(.HostName == $node) | .TailscaleIPs[] |
+    select(contains(":"))][0]')"
+ssh -6 "runner@$runner_ipv6"
 ```
+
+On clients whose Tailnet IPv4 route is not claimed by another tunnel,
+`tailscale ssh runner@gha-<run-id>-<run-attempt>` remains a valid shortcut.
 
 Do not enable **Use Tailscale DNS settings**, add a Quantumult X DNS override,
 create `/etc/resolver` entries, or pin ephemeral runner addresses in
