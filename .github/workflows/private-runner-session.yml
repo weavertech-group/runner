@@ -12,6 +12,11 @@ on:
         required: false
         default: true
         type: boolean
+      enable_devspace:
+        description: Start DevSpace MCP for the selected target repository
+        required: false
+        default: false
+        type: boolean
       ssh_public_key:
         description: Optional fallback Ed25519 public key
         required: false
@@ -68,6 +73,13 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Validate optional service request
+        if: ${{ inputs.enable_devspace && (inputs.target_id == '' || ! inputs.enable_ssh) }}
+        shell: bash
+        run: |
+          printf 'E50\n' >&2
+          exit 50
+
       - name: Prepare network
         if: ${{ inputs.enable_ssh }}
         shell: bash
@@ -89,6 +101,21 @@ jobs:
           TARGET_REPO: ${{ secrets.TARGET_REPO }}
           TARGET_REPO_AUTH: ${{ secrets.TARGET_REPO_AUTH }}
         run: bash scripts/configure-repository-credential.sh
+
+      - name: Prepare optional service runtime
+        if: ${{ inputs.enable_devspace }}
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.19.0
+
+      - name: Start optional service
+        if: ${{ inputs.enable_devspace }}
+        shell: bash
+        env:
+          TARGET_REPO: ${{ secrets.TARGET_REPO }}
+        run: |
+          bash scripts/install-cloudflared.sh
+          bash scripts/start-devspace.sh
 
       - name: Execute
         if: ${{ inputs.enable_ssh }}

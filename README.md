@@ -5,13 +5,17 @@ to a private Headscale network, and keeps it available over Tailscale SSH. The
 runner has no public SSH listener. An optional opaque target ID selects exactly
 one GitHub Environment without exposing the private repository name.
 
-The workflow is intentionally only a secure network/SSH handoff. It does not
-run issue agents, create pull requests, or implement a task queue.
+By default, the workflow is only a secure network/SSH handoff. An explicit
+`enable_devspace` option can additionally clone the selected target repository,
+start a DevSpace MCP server, and expose it through a temporary Cloudflare Quick
+Tunnel. It does not run issue agents, create pull requests, or implement a task
+queue.
 
 For repeatable setup, operation, validation, credential rotation, cleanup, and
 troubleshooting, use the privacy-safe
-[operations runbook](docs/runner-operations-runbook.md). This README describes
-the design invariants; the runbook is the authoritative operational procedure.
+[operations runbook](docs/runner-operations-runbook.md). The optional MCP service
+is documented separately in the [DevSpace session guide](docs/devspace-session.md).
+This README describes the design invariants.
 
 ## What is implemented
 
@@ -21,8 +25,12 @@ the design invariants; the runbook is the authoritative operational procedure.
 - Optional Ed25519 public-key mode using system OpenSSH on the tailnet only.
 - Public opaque-ID allowlist and one GitHub Environment per target repository.
 - A path-scoped Git credential store for the selected repository only.
+- Optional DevSpace `1.0.4` with Node.js `22.19.0`.
+- Pinned cloudflared `2026.7.2` Linux binary with an embedded SHA-256 check.
+- DevSpace MCP URL and Owner Token stored only in a mode-`0600` local file.
 - Minimal public output; detailed local diagnostics are never uploaded.
-- Best-effort logout plus ephemeral-node cleanup when a job is cancelled.
+- Best-effort service termination, logout, and ephemeral-node cleanup when a job
+  is cancelled.
 
 ## Required administrator setup
 
@@ -194,6 +202,19 @@ the command line:
 git clone https://github.com/<owner>/<repository>.git
 ```
 
+To start DevSpace automatically, select a non-empty `target_id`, keep
+`enable_ssh` enabled, and set `enable_devspace` to `true`. After connecting over
+private SSH, read the MCP URL and Owner Token:
+
+```bash
+cat ~/private-runner-session/devspace/connection.txt
+```
+
+Use the `MCP_URL` value when configuring ChatGPT. Enter `OWNER_TOKEN` when the
+DevSpace OAuth approval page opens. The quick-tunnel URL and token expire with
+the runner session. See the [DevSpace session guide](docs/devspace-session.md)
+for the full procedure and runtime policy.
+
 Supplying `ssh_public_key` switches the session to system OpenSSH. Only
 `ssh-ed25519` and `sk-ssh-ed25519@openssh.com` single-line keys are accepted;
 password, keyboard-interactive, and root login remain disabled. Tailscale SSH
@@ -205,9 +226,10 @@ The session step waits indefinitely and the job timeout is 360 minutes, so the
 runner stays online until GitHub enforces its six-hour hosted-job limit. Setup
 time is part of that limit, so usable SSH time is slightly less than six full
 hours. Ending or cancelling the workflow destroys the GitHub-hosted runner and
-its Git credential file; when GitHub gives finalization steps time to run, the
-cleanup step also attempts an immediate Headscale logout. Otherwise Headscale's
-ephemeral-node inactivity cleanup removes the disconnected node.
+its local connection files; when GitHub gives finalization steps time to run,
+the cleanup step also stops DevSpace and cloudflared, removes Git credentials,
+and attempts an immediate Headscale logout. Otherwise Headscale's ephemeral-node
+inactivity cleanup removes the disconnected node.
 
 ## Error codes
 
@@ -226,18 +248,26 @@ Only stable error codes are printed publicly:
 | `E30` | fallback SSH public key is invalid | runner |
 | `E40` | job reaches its configured timeout | GitHub Actions conclusion |
 | `E41` | run is cancelled | GitHub Actions conclusion |
+| `E50` | DevSpace requested without a target repository or private SSH | runner |
+| `E51` | cloudflared download, checksum, startup, or URL discovery failure | runner |
+| `E52` | DevSpace installation, startup, or local readiness failure | runner |
+| `E53` | selected target repository clone failure | runner |
+| `E54` | public DevSpace MCP/OAuth endpoint readiness failure | runner |
 
 `E25`, `E40`, and `E41` are platform/client outcomes and cannot reliably be
 emitted by a runner step: a denied client never executes code on the runner,
 and timeout/cancellation can terminate the machine before another step runs.
 
 Detailed command output stays under `$RUNNER_TEMP/private-runner-diagnostics`
-on the ephemeral machine. It is not printed, summarized, or uploaded.
+on the ephemeral machine. It is not printed, summarized, or uploaded. DevSpace
+connection material is stored separately under
+`~/private-runner-session/devspace` and is deleted during finalization.
 
 ## Local validation
 
 ```bash
 bash tests/session-lib.test.sh
 bash tests/workflow-security.test.sh
+bash tests/devspace-session.test.sh
 bash -n scripts/*.sh tests/*.sh
 ```
