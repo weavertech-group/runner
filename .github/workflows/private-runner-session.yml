@@ -80,6 +80,15 @@ jobs:
           printf 'E50\n' >&2
           exit 50
 
+      - name: Prepare Node runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.19.0
+
+      - name: Install Codex CLI
+        shell: bash
+        run: npm install -g @openai/codex
+
       - name: Prepare network
         if: ${{ inputs.enable_ssh }}
         shell: bash
@@ -101,12 +110,6 @@ jobs:
           TARGET_REPO: ${{ secrets.TARGET_REPO }}
           TARGET_REPO_AUTH: ${{ secrets.TARGET_REPO_AUTH }}
         run: bash scripts/configure-repository-credential.sh
-
-      - name: Prepare optional service runtime
-        if: ${{ inputs.enable_devspace }}
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
-        with:
-          node-version: 22.19.0
 
       - name: Start optional service
         if: ${{ inputs.enable_devspace }}
