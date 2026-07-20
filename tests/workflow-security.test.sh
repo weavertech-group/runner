@@ -36,4 +36,7 @@ grep -Fq 'openssh-server' "$CONNECT_SCRIPT" || \
 grep -Fq 'ListenAddress %s' "$CONNECT_SCRIPT" || \
   fail 'fallback SSH must bind only to the Tailscale address'
 
+grep -Fq '/health' "$CONNECT_SCRIPT" || \
+  fail 'Headscale health must be checked before classifying registration errors'
+
 printf 'workflow security tests passed\n'

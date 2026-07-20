@@ -7,6 +7,7 @@ status_file="$diagnostic_dir/tailscale-status.json"
 connect_log="$diagnostic_dir/connect.log"
 daemon_log="$diagnostic_dir/tailscaled.log"
 public_key="${SSH_PUBLIC_KEY-}"
+headscale_url="${HEADSCALE_URL-}"
 
 mkdir -p "$diagnostic_dir"
 chmod 700 "$diagnostic_dir"
@@ -15,12 +16,32 @@ if [[ -z "${HEADSCALE_AUTHKEY-}" ]]; then
   printf 'E22\n' >&2
   exit 22
 fi
-if [[ -z "${HEADSCALE_URL-}" ]]; then
+headscale_url="${headscale_url%/}"
+if [[ ! "$headscale_url" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?$ ]]; then
   printf 'E21\n' >&2
   exit 21
 fi
+if [[ ! "${HEADSCALE_MAGIC_DNS_DOMAIN-}" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
+  printf 'E23\n' >&2
+  exit 23
+fi
 
 printf '::add-mask::%s\n' "$HEADSCALE_AUTHKEY"
+
+if ! health_status="$(curl \
+  --fail \
+  --silent \
+  --show-error \
+  --location \
+  --proto '=https' \
+  --max-time 15 \
+  --output "$diagnostic_dir/headscale-health.json" \
+  --write-out '%{http_code}' \
+  "$headscale_url/health" \
+  2>"$diagnostic_dir/headscale-health.log")" || [[ "$health_status" != 200 ]]; then
+  printf 'E21\n' >&2
+  exit 21
+fi
 
 if ! sudo tailscaled \
   --state=mem: \
@@ -46,7 +67,7 @@ done
 
 node_name="gha-${GITHUB_RUN_ID:?}-${GITHUB_RUN_ATTEMPT:?}"
 up_args=(
-  --login-server="$HEADSCALE_URL"
+  --login-server="$headscale_url"
   --auth-key="$HEADSCALE_AUTHKEY"
   --hostname="$node_name"
   --accept-dns=true
@@ -58,14 +79,11 @@ if [[ -z "$public_key" ]]; then
 fi
 
 if ! sudo tailscale up "${up_args[@]}" >"$connect_log" 2>&1; then
-  if grep -Eiq \
-    '((auth|preauth).*(key|token).*(invalid|expired|unauthorized|not found)|(invalid|expired|unauthorized|not found).*(auth|preauth).*(key|token))' \
-    "$connect_log"; then
-    printf 'E22\n' >&2
-    exit 22
-  fi
-  printf 'E21\n' >&2
-  exit 21
+  # The control plane was healthy immediately before registration. Treat a
+  # rejected registration as an auth-key failure without parsing unstable CLI
+  # error prose.
+  printf 'E22\n' >&2
+  exit 22
 fi
 
 if ! sudo tailscale status --json >"$status_file" 2>>"$connect_log"; then
@@ -78,7 +96,7 @@ fqdn="$(jq -er '.Self.DNSName | strings | select(length > 1) | rtrimstr(".")' "$
   exit 23
 }
 
-if [[ -n "${HEADSCALE_MAGIC_DNS_DOMAIN-}" && "$fqdn" != *".${HEADSCALE_MAGIC_DNS_DOMAIN}" ]]; then
+if [[ "$fqdn" != *".${HEADSCALE_MAGIC_DNS_DOMAIN}" ]]; then
   printf 'E23\n' >&2
   exit 23
 fi

@@ -145,8 +145,8 @@ Only stable error codes are printed publicly:
 | `E11` | selected GitHub Environment unavailable | GitHub API preflight |
 | `E12` | `TARGET_REPO_AUTH` missing or not installed | runner |
 | `E20` | Tailscale download, checksum, or install failure | runner |
-| `E21` | daemon startup or Headscale connection failure | runner |
-| `E22` | missing, invalid, or expired Headscale key | runner |
+| `E21` | invalid HTTPS URL, unhealthy control plane, or daemon startup failure | runner |
+| `E22` | registration rejected after a successful Headscale health check | runner |
 | `E23` | MagicDNS name missing or has the wrong suffix | runner |
 | `E24` | selected SSH server cannot be enabled | runner |
 | `E25` | Headscale grant or SSH policy denies the member | SSH client/policy logs |
