@@ -10,25 +10,25 @@ die() {
 }
 
 resolve_target() {
-  local target_repo="${1-}"
+  local target_id="${1-}"
   local allowlist="${2-}"
-  local repository environment extra
+  local allowed_id environment extra
 
-  if [[ -z "$target_repo" ]]; then
-    printf 'repo--none\n'
+  if [[ -z "$target_id" ]]; then
+    printf 'session--none\n'
     return
   fi
 
-  [[ "$target_repo" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,37}[A-Za-z0-9])?/[A-Za-z0-9._-]{1,100}$ ]] || \
+  [[ "$target_id" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] || \
     die E10 10
   [[ -r "$allowlist" ]] || die E10 10
 
-  while read -r repository environment extra; do
-    [[ -z "${repository:-}" || "$repository" == \#* ]] && continue
-    [[ -z "${extra:-}" && "$environment" =~ ^repo--[A-Za-z0-9._-]+--[A-Za-z0-9._-]+$ ]] || \
+  while read -r allowed_id environment extra; do
+    [[ -z "${allowed_id:-}" || "$allowed_id" == \#* ]] && continue
+    [[ -z "${extra:-}" && "$environment" =~ ^session--[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] || \
       die E10 10
 
-    if [[ "$repository" == "$target_repo" ]]; then
+    if [[ "$allowed_id" == "$target_id" ]]; then
       printf '%s\n' "$environment"
       return
     fi

@@ -2,8 +2,8 @@
 
 This public repository starts an ephemeral GitHub-hosted Ubuntu runner, joins it
 to a private Headscale network, and keeps it available over Tailscale SSH. The
-runner has no public SSH listener. An optional `owner/repository` input selects
-exactly one GitHub Environment and therefore exactly one repository credential.
+runner has no public SSH listener. An optional opaque target ID selects exactly
+one GitHub Environment without exposing the private repository name.
 
 The workflow is intentionally only a secure network/SSH handoff. It does not
 run issue agents, create pull requests, or implement a task queue.
@@ -14,7 +14,7 @@ run issue agents, create pull requests, or implement a task queue.
 - Pinned Tailscale `1.94.2` Linux binary with an embedded SHA-256 check.
 - Headscale URL override, MagicDNS validation, and Tailscale SSH by default.
 - Optional Ed25519 public-key mode using system OpenSSH on the tailnet only.
-- Explicit target allowlist and one GitHub Environment per target repository.
+- Public opaque-ID allowlist and one GitHub Environment per target repository.
 - A path-scoped Git credential store for the selected repository only.
 - Minimal public output; detailed local diagnostics are never uploaded.
 - Best-effort logout plus ephemeral-node cleanup when a job is cancelled.
@@ -55,33 +55,46 @@ and be included in `group:platform-admins` (or the replacement group).
 
 ### 2. Configure repository settings
 
-Create these repository-level Actions settings:
+Create these repository-level Actions secrets. The URL and DNS suffix are
+sensitive metadata rather than authentication credentials, but storing them as
+secrets gives them the same automatic log masking as other Actions secrets.
 
 | Kind | Name | Value |
 | --- | --- | --- |
-| Secret | `HEADSCALE_AUTHKEY` | The tagged ephemeral preauth key |
-| Variable | `HEADSCALE_URL` | `https://headscale.example.com` |
-| Variable | `HEADSCALE_MAGIC_DNS_DOMAIN` | `mesh.example.net` |
+| Secret | `HEADSCALE_URL` | The externally reachable HTTPS control URL |
+| Secret | `HEADSCALE_MAGIC_DNS_DOMAIN` | The private MagicDNS suffix |
 
-Create a credential-free GitHub Environment named `repo--none`. The workflow
-uses it when no target repository is selected, so no repository token is
-referenced or installed.
+Do not create repository-level `HEADSCALE_AUTHKEY`, because any other trusted
+workflow in the repository could reference it. Create a GitHub Environment
+named `session--none` containing only environment secret `HEADSCALE_AUTHKEY`.
+The workflow uses this Environment when no target is selected.
 
 For each allowed repository:
 
-1. Create an environment such as `repo--alice--private-api`.
-2. Add environment secret `TARGET_REPO_AUTH`, using a fine-grained PAT limited
-   to that one repository. A short-lived GitHub App token issuer is preferred
-   for a later production phase.
-3. Add the exact mapping to [.github/target-repositories.txt](.github/target-repositories.txt):
+1. Allocate a public opaque ID such as `repo-07`.
+2. Create an Environment such as `session--repo-07`.
+3. Add these Environment secrets:
+
+   | Secret | Value |
+   | --- | --- |
+   | `HEADSCALE_AUTHKEY` | The tagged ephemeral preauth key |
+   | `TARGET_REPO` | The real private `owner/repository` name |
+   | `TARGET_REPO_AUTH` | A token limited to that repository |
+
+4. Add only the opaque mapping to [.github/target-repositories.txt](.github/target-repositories.txt):
 
    ```text
-   alice/private-api repo--alice--private-api
+   repo-07 session--repo-07
    ```
 
-The mapping is explicit rather than computed so different repository names can
-never collide onto the same environment. The resolver rejects all targets not
-in this file before the credential-bearing job starts.
+Never put a real private repository name in the public allowlist, Environment
+name, workflow input, run name, or step name. The resolver rejects opaque IDs
+not in the allowlist before the credential-bearing job starts.
+
+For every session Environment, restrict deployment branches to the protected
+default branch, enable required reviewers where appropriate, and disable admin
+bypass. The workflow also sets `deployment: false`, so using Environment
+secrets does not create a public deployment record.
 
 ### 3. Protect the public repository
 
@@ -102,7 +115,7 @@ inputs and run metadata in this public repository must be treated as public.
 ## Start and connect
 
 From the Actions UI, choose **Private Runner Session** and dispatch it. The
-optional `target_repo` value must match the allowlist. Leave `ssh_public_key`
+optional `target_id` value must match the opaque allowlist. Leave `ssh_public_key`
 empty for the default Tailscale SSH mode.
 
 The host is:
@@ -117,12 +130,13 @@ Connect from an authorized workstation:
 ssh runner@gha-<run-id>-<run-attempt>.mesh.example.net
 ```
 
-When a target was selected, Git is configured to return the environment token
-only for that repository path, so this works without putting a token in the
-command line:
+When a target was selected, Git is configured from the protected `TARGET_REPO`
+secret and returns the token only for that repository path. An authorized
+operator can clone the internally known repository without putting a token in
+the command line:
 
 ```bash
-git clone https://github.com/alice/private-api.git
+git clone https://github.com/<owner>/<repository>.git
 ```
 
 Supplying `ssh_public_key` switches the session to system OpenSSH. Only
@@ -141,9 +155,9 @@ Only stable error codes are printed publicly:
 
 | Code | Meaning | Where detected |
 | --- | --- | --- |
-| `E10` | unsupported or malformed `target_repo` | resolver |
+| `E10` | unsupported or malformed opaque `target_id` | resolver |
 | `E11` | selected GitHub Environment unavailable | GitHub API preflight |
-| `E12` | `TARGET_REPO_AUTH` missing or not installed | runner |
+| `E12` | selected `TARGET_REPO` or credential missing/invalid | runner |
 | `E20` | Tailscale download, checksum, or install failure | runner |
 | `E21` | invalid HTTPS URL, unhealthy control plane, or daemon startup failure | runner |
 | `E22` | registration rejected after a successful Headscale health check | runner |

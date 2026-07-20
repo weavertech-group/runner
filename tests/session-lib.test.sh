@@ -32,17 +32,17 @@ assert_exit() {
 }
 
 assert_eq \
-  'repo--alice--private-api' \
-  "$(bash "$LIB" resolve-target 'alice/private-api' "$FIXTURE")" \
-  'supported repository resolves to its environment'
+  'session--repo-07' \
+  "$(bash "$LIB" resolve-target 'repo-07' "$FIXTURE")" \
+  'supported opaque target ID resolves to its environment'
 
 assert_eq \
-  'repo--none' \
+  'session--none' \
   "$(bash "$LIB" resolve-target '' "$FIXTURE")" \
   'empty repository resolves to the credential-free environment'
 
-assert_exit 10 bash "$LIB" resolve-target 'mallory/unknown' "$FIXTURE"
-assert_exit 10 bash "$LIB" resolve-target '../bad/repo' "$FIXTURE"
+assert_exit 10 bash "$LIB" resolve-target 'repo-99' "$FIXTURE"
+assert_exit 10 bash "$LIB" resolve-target 'alice/private-api' "$FIXTURE"
 
 key_dir="$(mktemp -d)"
 trap 'rm -rf "$key_dir"' EXIT

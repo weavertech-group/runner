@@ -5,6 +5,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKFLOW="$ROOT_DIR/.github/workflows/private-runner-session.yml"
 CONNECT_SCRIPT="$ROOT_DIR/scripts/connect-headscale.sh"
+ALLOWLIST="$ROOT_DIR/.github/target-repositories.txt"
 
 fail() {
   printf 'FAIL: %s\n' "$1" >&2
@@ -24,8 +25,27 @@ fi
 grep -Fq 'TARGET_REPO_AUTH: ${{ secrets.TARGET_REPO_AUTH }}' "$WORKFLOW" || \
   fail 'selected repository credential is not scoped explicitly'
 
-grep -Fq "if: \${{ inputs.target_repo != '' }}" "$WORKFLOW" || \
+grep -Fq "if: \${{ inputs.target_id != '' }}" "$WORKFLOW" || \
   fail 'repository credential is referenced without an input guard'
+
+grep -Fq 'TARGET_REPO: ${{ secrets.TARGET_REPO }}' "$WORKFLOW" || \
+  fail 'real repository identity must come from the selected Environment'
+
+grep -Fq 'HEADSCALE_URL: ${{ secrets.HEADSCALE_URL }}' "$WORKFLOW" || \
+  fail 'Headscale URL must be masked as sensitive metadata'
+
+grep -Fq 'HEADSCALE_MAGIC_DNS_DOMAIN: ${{ secrets.HEADSCALE_MAGIC_DNS_DOMAIN }}' "$WORKFLOW" || \
+  fail 'MagicDNS domain must be masked as sensitive metadata'
+
+grep -Fq 'deployment: false' "$WORKFLOW" || \
+  fail 'session jobs must not create public deployment records'
+
+grep -Fq 'inputs.target_repo' "$WORKFLOW" && \
+  fail 'real repository names must not come from public workflow inputs'
+
+if sed '/^[[:space:]]*#/d; /^[[:space:]]*$/d' "$ALLOWLIST" | grep -Fq '/'; then
+  fail 'public allowlist must not contain owner/repository names'
+fi
 
 grep -Fq 'pull_request_target' "$WORKFLOW" && \
   fail 'workflow must not use pull_request_target'

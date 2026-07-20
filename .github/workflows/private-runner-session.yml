@@ -3,8 +3,8 @@ name: Private Runner Session
 on:
   workflow_dispatch:
     inputs:
-      target_repo:
-        description: Optional public owner/repo identifier
+      target_id:
+        description: Optional public opaque target identifier
         required: false
         type: string
       enable_ssh:
@@ -43,12 +43,12 @@ jobs:
         id: resolve
         shell: bash
         env:
-          TARGET_REPO: ${{ inputs.target_repo }}
+          TARGET_ID: ${{ inputs.target_id }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           environment_name="$(bash scripts/session-lib.sh resolve-target \
-            "$TARGET_REPO" .github/target-repositories.txt)"
+            "$TARGET_ID" .github/target-repositories.txt)"
           bash scripts/verify-environment.sh "$environment_name"
           printf 'environment_name=%s\n' "$environment_name" >> "$GITHUB_OUTPUT"
 
@@ -59,6 +59,7 @@ jobs:
     timeout-minutes: 330
     environment:
       name: ${{ needs.resolve-target.outputs.environment_name }}
+      deployment: false
     steps:
       - name: Prepare
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -74,17 +75,17 @@ jobs:
         if: ${{ inputs.enable_ssh }}
         shell: bash
         env:
-          HEADSCALE_URL: ${{ vars.HEADSCALE_URL }}
-          HEADSCALE_MAGIC_DNS_DOMAIN: ${{ vars.HEADSCALE_MAGIC_DNS_DOMAIN }}
+          HEADSCALE_URL: ${{ secrets.HEADSCALE_URL }}
+          HEADSCALE_MAGIC_DNS_DOMAIN: ${{ secrets.HEADSCALE_MAGIC_DNS_DOMAIN }}
           HEADSCALE_AUTHKEY: ${{ secrets.HEADSCALE_AUTHKEY }}
           SSH_PUBLIC_KEY: ${{ inputs.ssh_public_key }}
         run: bash scripts/connect-headscale.sh
 
       - name: Prepare repository access
-        if: ${{ inputs.target_repo != '' }}
+        if: ${{ inputs.target_id != '' }}
         shell: bash
         env:
-          TARGET_REPO: ${{ inputs.target_repo }}
+          TARGET_REPO: ${{ secrets.TARGET_REPO }}
           TARGET_REPO_AUTH: ${{ secrets.TARGET_REPO_AUTH }}
         run: bash scripts/configure-repository-credential.sh
 

@@ -10,6 +10,10 @@ if [[ -z "$target_repo" || -z "$credential" ]]; then
   printf 'E12\n' >&2
   exit 12
 fi
+if [[ ! "$target_repo" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,37}[A-Za-z0-9])?/[A-Za-z0-9._-]{1,100}$ ]]; then
+  printf 'E12\n' >&2
+  exit 12
+fi
 
 printf '::add-mask::%s\n' "$credential"
 umask 077

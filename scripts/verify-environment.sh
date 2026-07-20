@@ -8,7 +8,7 @@ api_url="${GITHUB_API_URL-https://api.github.com}"
 token="${GITHUB_TOKEN-}"
 diagnostic_dir="${RUNNER_TEMP:-/tmp}"
 
-[[ "$environment_name" =~ ^repo--[A-Za-z0-9._-]+(--[A-Za-z0-9._-]+)?$ ]] || {
+[[ "$environment_name" =~ ^session--[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] || {
   printf 'E11\n' >&2
   exit 11
 }

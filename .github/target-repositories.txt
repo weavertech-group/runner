@@ -1,5 +1,5 @@
-# One entry per allowed target. Keep the environment name explicit to avoid
-# ambiguous owner/repository-to-environment conversions.
+# Only opaque IDs belong in this public file. The real owner/repository value
+# is stored as TARGET_REPO in the corresponding GitHub Environment.
 #
-# owner/repository repo--owner--repository
-# alice/private-api repo--alice--private-api
+# target-id environment-name
+# repo-07 session--repo-07
