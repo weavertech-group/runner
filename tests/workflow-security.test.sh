@@ -6,6 +6,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKFLOW="$ROOT_DIR/.github/workflows/private-runner-session.yml"
 CONNECT_SCRIPT="$ROOT_DIR/scripts/connect-headscale.sh"
 ALLOWLIST="$ROOT_DIR/.github/target-repositories.txt"
+CODEOWNERS="$ROOT_DIR/.github/CODEOWNERS"
+SECURITY_POLICY="$ROOT_DIR/SECURITY.md"
 CLOUDFLARED_SCRIPT="$ROOT_DIR/scripts/install-cloudflared.sh"
 DEVSPACE_SCRIPT="$ROOT_DIR/scripts/start-devspace.sh"
 CLEANUP_SCRIPT="$ROOT_DIR/scripts/cleanup.sh"
@@ -16,8 +18,17 @@ fail() {
 }
 
 [[ -f "$WORKFLOW" ]] || fail 'workflow is missing'
+[[ -f "$CODEOWNERS" ]] || fail 'CODEOWNERS is missing'
+[[ -f "$SECURITY_POLICY" ]] || fail 'security policy is missing'
 [[ -f "$CLOUDFLARED_SCRIPT" ]] || fail 'cloudflared installer is missing'
 [[ -f "$DEVSPACE_SCRIPT" ]] || fail 'DevSpace launcher is missing'
+
+grep -Fq 'workflow_dispatch:' "$WORKFLOW" || \
+  fail 'privileged workflow must remain manually dispatched'
+if grep -Eq '^[[:space:]]+(pull_request|pull_request_target|push|issue_comment|workflow_run|repository_dispatch|schedule):' \
+  "$WORKFLOW"; then
+  fail 'privileged workflow must not gain an automatic or fork-driven trigger'
+fi
 
 if grep -Eq 'uses: [^@]+@(main|master|v[0-9]+([.]?[0-9]+)*)$' "$WORKFLOW"; then
   fail 'third-party actions must be pinned to a full commit SHA'
@@ -61,6 +72,11 @@ fi
 
 grep -Fq 'pull_request_target' "$WORKFLOW" && \
   fail 'workflow must not use pull_request_target'
+
+grep -Fq '/.github/ @ronhuafeng' "$CODEOWNERS" || \
+  fail 'security-sensitive GitHub configuration lacks an explicit code owner'
+grep -Fq '/SECURITY.md @ronhuafeng' "$CODEOWNERS" || \
+  fail 'security policy lacks an explicit code owner'
 
 grep -Fq 'openssh-server' "$CONNECT_SCRIPT" || \
   fail 'fallback mode must install the SSH server explicitly'

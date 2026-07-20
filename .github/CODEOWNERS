@@ -1,5 +1,9 @@
-# Replace or extend this owner with the team that approves security-sensitive changes.
-/.github/workflows/ @bef0rewind
-/.github/target-repositories.txt @bef0rewind
-/scripts/ @bef0rewind
-/headscale/ @bef0rewind
+# Security-sensitive changes must be reviewed by a collaborator with write access.
+# The default-branch ruleset must also require review from Code Owners.
+* @ronhuafeng
+/.github/ @ronhuafeng
+/scripts/ @ronhuafeng
+/headscale/ @ronhuafeng
+/tests/ @ronhuafeng
+/SECURITY.md @ronhuafeng
+/docs/ @ronhuafeng
