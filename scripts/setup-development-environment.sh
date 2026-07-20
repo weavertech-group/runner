@@ -32,8 +32,10 @@ install_kubernetes_plugins() {
     sha256sum --check --status
   mkdir -p "$kubectx_dir"
   tar -xzf "$kubectx_archive" --strip-components=1 -C "$kubectx_dir"
-  sudo install -m 0755 "$kubectx_dir/kubectx" /usr/local/bin/kubectl-ctx
-  sudo install -m 0755 "$kubectx_dir/kubens" /usr/local/bin/kubectl-ns
+  sudo install -m 0755 "$kubectx_dir/kubectx" /usr/local/bin/kubectx
+  sudo install -m 0755 "$kubectx_dir/kubens" /usr/local/bin/kubens
+  sudo ln -sfn /usr/local/bin/kubectx /usr/local/bin/kubectl-ctx
+  sudo ln -sfn /usr/local/bin/kubens /usr/local/bin/kubectl-ns
 
   curl --fail --silent --show-error --location --retry 3 \
     --proto '=https' --tlsv1.2 \
@@ -92,16 +94,26 @@ main() {
     git \
     htop \
     jq \
-    libssl-dev \
+    libbz2-dev \
+    libffi-dev \
+    libgdbm-dev \
+    liblzma-dev \
+    libncurses-dev \
+    libnss3-dev \
+    libreadline-dev \
     libsqlite3-dev \
+    libssl-dev \
     lsof \
     pkg-config \
     ripgrep \
     socat \
+    tk-dev \
     tmux \
     tree \
     unzip \
-    xz-utils
+    uuid-dev \
+    xz-utils \
+    zlib1g-dev
 
   sudo ln -sfn /usr/bin/fdfind /usr/local/bin/fd
   sudo ln -sfn /usr/bin/batcat /usr/local/bin/bat
