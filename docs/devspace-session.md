@@ -3,6 +3,23 @@
 The private runner workflow can optionally start a DevSpace MCP server for the
 selected target repository. The service is disabled by default.
 
+See also the repository-wide [security policy and threat model](../SECURITY.md).
+
+## Disabled behavior
+
+When `enable_devspace` is omitted or set to `false`, the workflow keeps its
+original behavior:
+
+1. resolve the optional opaque target;
+2. join the private Headscale network when SSH is enabled;
+3. configure the selected repository credential when a target is selected;
+4. wait in the `Execute` step until cancellation or the hosted-job limit; and
+5. perform the normal Tailscale and Git credential cleanup.
+
+No Node.js setup, DevSpace installation, target checkout, cloudflared process,
+public MCP endpoint, or connection file is created. The extended finalizer
+safely ignores absent DevSpace files and processes.
+
 ## Start a session
 
 Dispatch **Private Runner Session** with all of these values:
@@ -59,6 +76,22 @@ DevSpace OAuth approval page opens, enter `OWNER_TOKEN`.
 Cloudflare Quick Tunnel hostnames are temporary. A new workflow run produces a
 new URL and Owner Token, and both stop working when the job ends.
 
+## Quick Tunnel lifecycle
+
+This workflow uses an anonymous Quick Tunnel rather than a named Cloudflare
+Tunnel. It does not create a persistent Cloudflare account resource, custom DNS
+record, or stable hostname.
+
+During normal cancellation, the finalizer terminates the DevSpace and
+cloudflared process groups and removes the connection files. If GitHub destroys
+the hosted runner before the finalizer runs, all local processes and files still
+disappear with the virtual machine. The previous `trycloudflare.com` hostname
+can no longer reach DevSpace.
+
+The old MCP entry may remain saved in ChatGPT, but it will report a connection
+failure. Start a new workflow run, read the newly generated `MCP_URL`, and update
+the ChatGPT connection.
+
 ## Runtime policy
 
 DevSpace is configured with:
@@ -72,14 +105,40 @@ DEVSPACE_LOG_SHELL_COMMANDS=0
 ```
 
 DevSpace shell commands still run with the GitHub-hosted runner user's
-permissions. The selected repository token must remain limited to that one
-repository and to the minimum required permissions.
+permissions. The filesystem allowlist is not an operating-system shell sandbox.
+The selected repository token must remain limited to that one repository and to
+the minimum required permissions.
+
+GitHub-hosted runner isolation limits persistence after the job ends, but it does
+not prevent an authenticated MCP client from reading session-local files,
+invoking `sudo`, using the selected Git credential, or accessing any network
+destination allowed by the deployed Headscale policy. Only authorize a trusted
+MCP client.
 
 The workflow does not configure a named Cloudflare Tunnel, a custom domain, or
 Cloudflare Access. It uses a temporary Quick Tunnel because the session itself
 is ephemeral. For a stable hostname, replace the quick-tunnel launch with a
 separately reviewed named-tunnel configuration and keep its credentials in the
 selected GitHub Environment.
+
+## Forks and pull requests
+
+A fork receives the public source files but does not inherit the upstream
+repository's Secrets, Environments, deployment protection rules, branch
+protection, Headscale nodes, or private repository access. Running the workflow
+inside a fork therefore requires the fork owner to create a separate set of
+credentials and GitHub settings.
+
+Never copy the upstream production `HEADSCALE_AUTHKEY`, `TARGET_REPO_AUTH`, or
+other deployment credentials into an untrusted fork. A fork owner can modify the
+workflow to print or transmit every credential configured in that fork.
+
+This privileged workflow only uses `workflow_dispatch`; it does not run code
+from fork pull requests automatically. However, once a workflow or script change
+from a fork is merged into the upstream default branch, later manual runs execute
+that merged code with the selected Environment. Workflow, script, policy, and
+dependency changes therefore require Code Owner review and protected-branch
+enforcement.
 
 ## Local diagnostics
 
