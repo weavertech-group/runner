@@ -1,1 +1,4 @@
 .secrets.env
+headscale/policy.private.hujson
+headscale/config.private.yaml
+.wangbin.secrets.env

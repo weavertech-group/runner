@@ -37,6 +37,13 @@ Deploy a private copy of [the policy example](headscale/policy.example.hujson).
 Replace the example identity with the real team group. Do not publish the real
 policy here because member identities can be sensitive.
 
+Adding a non-empty `grants` array changes the tailnet from Headscale's implicit
+allow-all behavior to explicit authorization. Before enabling it, inventory
+existing personal-node traffic and subnet routes and add grants for the traffic
+that must remain available. The example preserves full connectivity between
+members of `group:platform-admins`; add explicit CIDR destinations for any
+existing subnet routes.
+
 Create a dedicated tagged, reusable, ephemeral, pre-authorized key. Confirm the
 flags against the installed version:
 
@@ -52,6 +59,20 @@ headscale preauthkeys create \
 
 Team workstations must join the same Headscale network, accept its DNS settings,
 and be included in `group:platform-admins` (or the replacement group).
+
+Give each person a separate Headscale user. On Headscale versions without a
+node-owner transfer command, an existing device must reauthenticate under its
+new user. Migrate ordinary clients first and subnet routers last, because a
+re-registered subnet router may need its advertised routes approved again. Use
+a short-lived, non-reusable key for one device at a time:
+
+```bash
+headscale users create MEMBER
+headscale preauthkeys create --user MEMBER_ID --expiration 24h
+```
+
+After the member reconnects, verify the node owner, MagicDNS name, peer access,
+and any routes before deleting or expiring the old node record.
 
 ### 2. Configure repository settings
 

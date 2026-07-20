@@ -14,6 +14,14 @@
   },
 
   "grants": [
+    // A non-empty grants array is default-deny. This rule preserves full
+    // connectivity among administrator-owned personal devices. Add separate
+    // CIDR destinations for any subnet routes that must remain reachable.
+    {
+      "src": ["group:platform-admins"],
+      "dst": ["group:platform-admins"],
+      "ip": ["*"]
+    },
     {
       "src": ["group:platform-admins"],
       "dst": ["tag:gha-runner"],

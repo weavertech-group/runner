@@ -59,4 +59,12 @@ grep -Fq 'ListenAddress %s' "$CONNECT_SCRIPT" || \
 grep -Fq '/health' "$CONNECT_SCRIPT" || \
   fail 'Headscale health must be checked before classifying registration errors'
 
+grep -Fq 'sudo install -d -m 0755 /var/run/tailscale' "$CONNECT_SCRIPT" || \
+  fail 'direct tailscaled startup must create its socket directory'
+
+if grep -Eq 'tailscaled([[:space:]\\]|$)' "$CONNECT_SCRIPT" && \
+   grep -Eq '&[[:space:]]+then' "$CONNECT_SCRIPT"; then
+  fail 'background daemon startup must not use an asynchronous if condition'
+fi
+
 printf 'workflow security tests passed\n'

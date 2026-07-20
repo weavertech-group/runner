@@ -43,14 +43,21 @@ if ! health_status="$(curl \
   exit 21
 fi
 
-if ! sudo tailscaled \
+sudo install -d -m 0755 /var/run/tailscale
+sudo tailscaled \
   --state=mem: \
   --socket=/var/run/tailscale/tailscaled.sock \
-  >"$daemon_log" 2>&1 & then
+  >"$daemon_log" 2>&1 &
+daemon_pid="$!"
+echo "$daemon_pid" > "$diagnostic_dir/tailscaled.pid"
+
+# Starting a command in the background only proves that the shell forked it.
+# Check that the daemon survived startup before polling its socket.
+sleep 0.5
+if ! sudo kill -0 "$daemon_pid" 2>/dev/null; then
   printf 'E21\n' >&2
   exit 21
 fi
-echo "$!" > "$diagnostic_dir/tailscaled.pid"
 
 ready=false
 for _ in {1..40}; do
