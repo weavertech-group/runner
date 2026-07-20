@@ -63,6 +63,13 @@ grep -Fq 'openssh-server' "$CONNECT_SCRIPT" || \
 grep -Fq 'ListenAddress %s' "$CONNECT_SCRIPT" || \
   fail 'fallback SSH must bind only to the Tailscale address'
 
+grep -Fq 'AddressFamily inet6' "$CONNECT_SCRIPT" || \
+  fail 'fallback SSH must use the IPv6-only tailnet path'
+
+if grep -Fq 'tailnet_ipv4' "$CONNECT_SCRIPT"; then
+  fail 'fallback SSH must not depend on conflicting CGNAT routes'
+fi
+
 grep -Fq '/health' "$CONNECT_SCRIPT" || \
   fail 'Headscale health must be checked before classifying registration errors'
 

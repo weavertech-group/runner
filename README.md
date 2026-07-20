@@ -49,6 +49,13 @@ for clients that choose to use MagicDNS when the Headscale IPv6 pool is
 enabled. Runner sessions and workstations that coexist with Quantumult X do
 not install these DNS settings into the operating system.
 
+The example additionally uses `hosts` aliases to apply the official
+`disable-ipv4` node attribute only to the macOS devices that coexist with
+Quantumult X and to `tag:gha-runner`. Replace the example host addresses with
+those devices' current Headscale IPv4 addresses before deploying the policy.
+This makes their Tailnet path IPv6-only: Quantumult X keeps ownership of IPv4
+and system DNS, while Tailscale avoids the conflicting `100.64.0.0/10` range.
+
 Create a dedicated tagged, reusable, ephemeral, pre-authorized key. Confirm the
 flags against the installed version:
 
@@ -158,21 +165,14 @@ On macOS workstations that run Quantumult X, use the Homebrew/open-source
 sudo tailscale set --accept-dns=false
 ```
 
-On a workstation where Quantumult X excludes `100.64.0.0/10`, the excluded
-IPv4 route can take precedence over the open-source `tailscaled` route. Read
-the runner's IPv6 address from the local Tailscale netmap and connect without
-system DNS or an SSH config alias:
+Connect through the Tailscale CLI. It resolves the node from the local daemon
+even when system DNS integration is disabled. The `disable-ipv4` policy makes
+the selected workstation and runner use their conflict-free Tailnet IPv6
+addresses automatically:
 
 ```bash
-node="gha-<run-id>-<run-attempt>"
-runner_ipv6="$(tailscale status --json | jq -er --arg node "$node" \
-  '[.Peer[] | select(.HostName == $node) | .TailscaleIPs[] |
-    select(contains(":"))][0]')"
-ssh -6 "runner@$runner_ipv6"
+tailscale ssh runner@gha-<run-id>-<run-attempt>
 ```
-
-On clients whose Tailnet IPv4 route is not claimed by another tunnel,
-`tailscale ssh runner@gha-<run-id>-<run-attempt>` remains a valid shortcut.
 
 Do not enable **Use Tailscale DNS settings**, add a Quantumult X DNS override,
 create `/etc/resolver` entries, or pin ephemeral runner addresses in
@@ -193,8 +193,8 @@ Supplying `ssh_public_key` switches the session to system OpenSSH. Only
 `ssh-ed25519` and `sk-ssh-ed25519@openssh.com` single-line keys are accepted;
 password, keyboard-interactive, and root login remain disabled. Tailscale SSH
 is not enabled in this fallback mode because it owns tailnet TCP port 22 and
-would bypass `authorized_keys`. Find the current runner address with
-`tailscale status`, then connect to that address with regular `ssh`.
+would bypass `authorized_keys`. Find the current runner IPv6 address with
+`tailscale status`, then connect to that address with `ssh -6`.
 
 The session step waits indefinitely and the job timeout is 360 minutes, so the
 runner stays online until GitHub enforces its six-hour hosted-job limit. Setup

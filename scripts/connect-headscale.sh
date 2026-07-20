@@ -108,8 +108,8 @@ else
   fi
   chmod 600 "$status_file"
 
-  tailnet_ipv4="$(jq -er \
-    '[.Self.TailscaleIPs[] | select(test("^[0-9]+\\."))][0]' \
+  tailnet_ipv6="$(jq -er \
+    '[.Self.TailscaleIPs[] | select(contains(":"))][0]' \
     "$status_file" 2>/dev/null)" || {
     printf 'E24\n' >&2
     exit 24
@@ -125,8 +125,8 @@ else
   fi
 
   printf \
-    'AddressFamily inet\nListenAddress %s\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin no\nAllowUsers runner\n' \
-    "$tailnet_ipv4" | \
+    'AddressFamily inet6\nListenAddress %s\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin no\nAllowUsers runner\n' \
+    "$tailnet_ipv6" | \
     sudo tee /etc/ssh/sshd_config.d/99-private-runner.conf >/dev/null
 
   if ! sudo systemctl restart ssh >"$diagnostic_dir/sshd.log" 2>&1; then
