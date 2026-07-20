@@ -39,10 +39,32 @@ resolve_target() {
 
 validate_key() {
   local public_key="${1-}"
+  local key_file fingerprint key_type expected_type
 
   [[ "$public_key" != *$'\n'* && "$public_key" != *$'\r'* ]] || die E30 30
   [[ "$public_key" =~ ^(ssh-ed25519|sk-ssh-ed25519@openssh.com)[[:space:]][A-Za-z0-9+/]+={0,3}([[:space:]][^[:cntrl:]]+)?$ ]] || \
     die E30 30
+
+  key_type="${BASH_REMATCH[1]}"
+  key_file="$(mktemp)"
+  chmod 600 "$key_file"
+  printf '%s\n' "$public_key" > "$key_file"
+
+  if ! fingerprint="$(ssh-keygen -l -f "$key_file" 2>/dev/null)"; then
+    rm -f "$key_file"
+    die E30 30
+  fi
+  rm -f "$key_file"
+
+  case "$key_type" in
+    ssh-ed25519)
+      expected_type='(ED25519)'
+      ;;
+    sk-ssh-ed25519@openssh.com)
+      expected_type='(ED25519-SK)'
+      ;;
+  esac
+  [[ "$fingerprint" == *"$expected_type" ]] || die E30 30
 }
 
 main() {

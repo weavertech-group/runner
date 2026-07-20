@@ -44,8 +44,14 @@ assert_eq \
 assert_exit 10 bash "$LIB" resolve-target 'mallory/unknown' "$FIXTURE"
 assert_exit 10 bash "$LIB" resolve-target '../bad/repo' "$FIXTURE"
 
-bash "$LIB" validate-key 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKey operator@example'
-bash "$LIB" validate-key 'sk-ssh-ed25519@openssh.com AAAAGnNrLX TestKey'
+key_dir="$(mktemp -d)"
+trap 'rm -rf "$key_dir"' EXIT
+ssh-keygen -q -t ed25519 -N '' -f "$key_dir/id_ed25519"
+
+bash "$LIB" validate-key "$(<"$key_dir/id_ed25519.pub")"
+bash "$LIB" validate-key \
+  'sk-ssh-ed25519@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5QG9wZW5zc2guY29tAAAAIAABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4fAAAABHNzaDo= operator@example'
+assert_exit 30 bash "$LIB" validate-key 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestKey operator@example'
 assert_exit 30 bash "$LIB" validate-key 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ'
 assert_exit 30 bash "$LIB" validate-key $'ssh-ed25519 AAAA\ninjected'
 

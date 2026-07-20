@@ -97,11 +97,25 @@ else
   printf '%s\n' "$public_key" >> "$HOME/.ssh/authorized_keys"
   chmod 600 "$HOME/.ssh/authorized_keys"
 
-  printf '%s\n' \
-    'PasswordAuthentication no' \
-    'KbdInteractiveAuthentication no' \
-    'PermitRootLogin no' \
-    'AllowUsers runner' | \
+  tailnet_ipv4="$(jq -er \
+    '[.Self.TailscaleIPs[] | select(test("^[0-9]+\\."))][0]' \
+    "$status_file" 2>/dev/null)" || {
+    printf 'E24\n' >&2
+    exit 24
+  }
+
+  if ! {
+    sudo apt-get update -qq
+    sudo env DEBIAN_FRONTEND=noninteractive \
+      apt-get install -y -qq openssh-server
+  } >"$diagnostic_dir/sshd-install.log" 2>&1; then
+    printf 'E24\n' >&2
+    exit 24
+  fi
+
+  printf \
+    'AddressFamily inet\nListenAddress %s\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin no\nAllowUsers runner\n' \
+    "$tailnet_ipv4" | \
     sudo tee /etc/ssh/sshd_config.d/99-private-runner.conf >/dev/null
 
   if ! sudo systemctl restart ssh >"$diagnostic_dir/sshd.log" 2>&1; then

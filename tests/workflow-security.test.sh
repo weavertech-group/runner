@@ -4,6 +4,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKFLOW="$ROOT_DIR/.github/workflows/private-runner-session.yml"
+CONNECT_SCRIPT="$ROOT_DIR/scripts/connect-headscale.sh"
 
 fail() {
   printf 'FAIL: %s\n' "$1" >&2
@@ -28,5 +29,11 @@ grep -Fq "if: \${{ inputs.target_repo != '' }}" "$WORKFLOW" || \
 
 grep -Fq 'pull_request_target' "$WORKFLOW" && \
   fail 'workflow must not use pull_request_target'
+
+grep -Fq 'openssh-server' "$CONNECT_SCRIPT" || \
+  fail 'fallback mode must install the SSH server explicitly'
+
+grep -Fq 'ListenAddress %s' "$CONNECT_SCRIPT" || \
+  fail 'fallback SSH must bind only to the Tailscale address'
 
 printf 'workflow security tests passed\n'
