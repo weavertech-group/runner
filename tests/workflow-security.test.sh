@@ -64,13 +64,10 @@ fi
 
 grep -Fq 'TARGET_REPO_AUTH: ${{ secrets.TARGET_REPO_AUTH }}' "$WORKFLOW" || \
   fail 'selected repository credential is not scoped explicitly'
-
 grep -Fq "if: \${{ inputs.target_id != '' }}" "$WORKFLOW" || \
   fail 'repository credential is referenced without an input guard'
-
 grep -Fq 'TARGET_REPO: ${{ secrets.TARGET_REPO }}' "$WORKFLOW" || \
   fail 'real repository identity must come from the selected Environment'
-
 grep -Fq 'HEADSCALE_URL: ${{ secrets.HEADSCALE_URL }}' "$WORKFLOW" || \
   fail 'Headscale URL must be masked as sensitive metadata'
 
@@ -80,13 +77,10 @@ fi
 
 grep -Fq 'deployment: false' "$WORKFLOW" || \
   fail 'session jobs must not create public deployment records'
-
 grep -Fq 'timeout-minutes: 360' "$WORKFLOW" || \
   fail 'session job must use the full GitHub-hosted six-hour limit'
-
 grep -Fq 'run: sleep infinity' "$WORKFLOW" || \
   fail 'session must wait for platform termination instead of exiting early'
-
 grep -Fq 'inputs.target_repo' "$WORKFLOW" && \
   fail 'real repository names must not come from public workflow inputs'
 
@@ -96,7 +90,6 @@ fi
 
 grep -Fq 'pull_request_target' "$WORKFLOW" && \
   fail 'workflow must not use pull_request_target'
-
 grep -Fq '/.github/ @ronhuafeng' "$CODEOWNERS" || \
   fail 'security-sensitive GitHub configuration lacks an explicit code owner'
 grep -Fq '/SECURITY.md @ronhuafeng' "$CODEOWNERS" || \
@@ -104,23 +97,18 @@ grep -Fq '/SECURITY.md @ronhuafeng' "$CODEOWNERS" || \
 
 grep -Fq 'openssh-server' "$CONNECT_SCRIPT" || \
   fail 'fallback mode must install the SSH server explicitly'
-
 grep -Fq 'ListenAddress %s' "$CONNECT_SCRIPT" || \
   fail 'fallback SSH must bind only to the Tailscale address'
-
 grep -Fq 'AddressFamily inet6' "$CONNECT_SCRIPT" || \
   fail 'fallback SSH must use the IPv6-only tailnet path'
-
 if grep -Fq 'tailnet_ipv4' "$CONNECT_SCRIPT"; then
   fail 'fallback SSH must not depend on conflicting CGNAT routes'
 fi
 
 grep -Fq '/health' "$CONNECT_SCRIPT" || \
   fail 'Headscale health must be checked before classifying registration errors'
-
 grep -Fq 'sudo install -d -m 0755 /var/run/tailscale' "$CONNECT_SCRIPT" || \
   fail 'direct tailscaled startup must create its socket directory'
-
 if grep -Eq 'tailscaled([[:space:]\\]|$)' "$CONNECT_SCRIPT" && \
    grep -Eq '&[[:space:]]+then' "$CONNECT_SCRIPT"; then
   fail 'background daemon startup must not use an asynchronous if condition'
@@ -128,10 +116,8 @@ fi
 
 grep -Fq 'tailscale status --json' "$CONNECT_SCRIPT" || \
   fail 'daemon readiness must work before the node is logged in'
-
 grep -Fq -- '--accept-dns=false' "$CONNECT_SCRIPT" || \
   fail 'runner must not install tailnet DNS settings'
-
 if grep -Eq 'HEADSCALE_MAGIC_DNS_DOMAIN|DNSName|runner-fqdn' "$CONNECT_SCRIPT"; then
   fail 'runner connection must not validate or persist MagicDNS names'
 fi
@@ -145,7 +131,7 @@ fi
   fail 'both jobs must use Ubuntu 24.04'
 grep -Fq 'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020' "$WORKFLOW" || \
   fail 'session Node runtime action is not pinned'
-grep -Fq 'node-version: 22.22.2' "$WORKFLOW" || \
+grep -Fq 'node-version: 22.23.1' "$WORKFLOW" || \
   fail 'session Node runtime version is not fixed'
 grep -Fq 'run: bash scripts/setup-development-environment.sh' "$WORKFLOW" || \
   fail 'development environment is not installed for runner sessions'
@@ -169,18 +155,20 @@ require_unconditional_step 'Verify development environment' 'Prepare network' \
 
 # shellcheck source=../scripts/development-versions.env
 source "$DEVELOPMENT_VERSIONS"
-[[ "$NODE_VERSION" == '22.22.2' ]] || fail 'Node version is not pinned'
+[[ "$NODE_VERSION" == '22.23.1' ]] || fail 'Node version is not pinned'
 [[ "$COREPACK_VERSION" == '0.35.0' ]] || fail 'Corepack version is not pinned'
-[[ "$PNPM_VERSION" == '11.4.0' ]] || fail 'pnpm version is not pinned'
+[[ "$PNPM_VERSION" == '11.15.0' ]] || fail 'pnpm version is not pinned'
 [[ "$YARN_VERSION" == '4.17.1' ]] || fail 'Yarn version is not pinned'
-[[ "$UV_VERSION" == '0.11.16' ]] || fail 'uv version is not pinned'
-[[ "$MISE_VERSION" == 'v2026.7.0' ]] || fail 'mise version is not pinned'
+[[ "$UV_VERSION" == '0.11.29' ]] || fail 'uv version is not pinned'
+[[ "$UV_SHA256" == '04f8b82f5d47f0512dcd32c67a4a6f16a0ea27c81537c338fd0ad6b23cebe829' ]] || \
+  fail 'uv checksum is not pinned'
+[[ "$MISE_VERSION" == 'v2026.7.7' ]] || fail 'mise version is not pinned'
 [[ "$PYTHON_VERSION" == '3.14.6' ]] || fail 'Python version is not pinned'
 [[ "$GO_VERSION" == '1.26.5' ]] || fail 'Go version is not pinned'
 [[ "$RUST_VERSION" == '1.97.1' ]] || fail 'Rust version is not pinned'
-[[ "$TERRAFORM_VERSION" == '1.15.5' ]] || fail 'Terraform version is not pinned'
-[[ "$OPENTOFU_VERSION" == '1.11.7' ]] || fail 'OpenTofu version is not pinned'
-[[ "$PLAYWRIGHT_VERSION" == '1.60.0' ]] || fail 'Playwright version is not pinned'
+[[ "$TERRAFORM_VERSION" == '1.15.8' ]] || fail 'Terraform version is not pinned'
+[[ "$OPENTOFU_VERSION" == '1.12.4' ]] || fail 'OpenTofu version is not pinned'
+[[ "$PLAYWRIGHT_VERSION" == '1.61.1' ]] || fail 'Playwright version is not pinned'
 [[ "$MIGRATE_VERSION" == '4.19.1' ]] || fail 'database migration tool version is not pinned'
 if grep -Eq 'CODEX|CLAUDE|@openai/codex|@anthropic-ai/claude-code' "$DEVELOPMENT_VERSIONS"; then
   fail 'Codex and Claude must not be pinned in the development version manifest'
@@ -197,19 +185,20 @@ grep -Fq '/usr/bin/batcat /usr/local/bin/bat' "$DEVELOPMENT_SETUP" || \
   fail 'bat compatibility command is missing'
 grep -Fq 'direnv hook bash' "$DEVELOPMENT_SETUP" || \
   fail 'direnv is not enabled for SSH Bash sessions'
-grep -Fq 'releases/download/${UV_VERSION}/uv-installer.sh' "$DEVELOPMENT_SETUP" || \
-  fail 'uv installer URL is not versioned'
+grep -Fq 'uv-x86_64-unknown-linux-gnu.tar.gz' "$DEVELOPMENT_SETUP" || \
+  fail 'uv binary URL is not versioned'
+grep -Fq 'printf '\''%s  %s\\n'\'' "$UV_SHA256"' "$DEVELOPMENT_SETUP" || \
+  fail 'uv binary checksum is not verified'
 grep -Fq 'jdx/mise/releases/download/${MISE_VERSION}/install.sh' "$DEVELOPMENT_SETUP" || \
   fail 'mise installer URL is not versioned'
+grep -Fq 'MISE_GITHUB_ATTESTATIONS=true' "$DEVELOPMENT_SETUP" || \
+  fail 'mise GitHub artifact attestation verification is not enabled'
 grep -Fq 'corepack@${COREPACK_VERSION}' "$DEVELOPMENT_SETUP" || \
   fail 'Corepack version is not applied'
 grep -Fq 'pnpm@${PNPM_VERSION}' "$DEVELOPMENT_SETUP" || \
   fail 'pnpm version is not applied'
 grep -Fq 'yarn@${YARN_VERSION}' "$DEVELOPMENT_SETUP" || \
   fail 'Yarn version is not applied'
-for tool in python go rust terraform opentofu; do
-  grep -Fq "$tool = \"\${${tool^^}_VERSION}\"" "$DEVELOPMENT_SETUP" 2>/dev/null || true
-done
 grep -Fq 'python = "${PYTHON_VERSION}"' "$DEVELOPMENT_SETUP" || \
   fail 'Python version is not managed by mise'
 grep -Fq 'go = "${GO_VERSION}"' "$DEVELOPMENT_SETUP" || \
@@ -226,8 +215,8 @@ grep -Fq 'playwright install --with-deps chromium' "$DEVELOPMENT_SETUP" || \
   fail 'Playwright Chromium is not installed'
 grep -Fq 'golang-migrate/migrate/v4/cmd/migrate@v${MIGRATE_VERSION}' "$DEVELOPMENT_SETUP" || \
   fail 'database migration CLI is not installed at a pinned version'
-grep -Fq 'sha256sum --check --status' "$DEVELOPMENT_SETUP" || \
-  fail 'downloaded Kubernetes plugins are not checksum verified'
+[[ "$(grep -Fc 'sha256sum --check --status' "$DEVELOPMENT_SETUP")" -ge 3 ]] || \
+  fail 'downloaded tool archives are not checksum verified'
 for plugin in kubectl-ctx kubectl-ns kubectl-neat; do
   grep -Fq "/usr/local/bin/$plugin" "$DEVELOPMENT_SETUP" || \
     fail "$plugin is not installed"
@@ -267,7 +256,6 @@ grep -Fq 'bash scripts/install-cloudflared.sh' "$WORKFLOW" || \
   fail 'workflow does not install the pinned tunnel binary'
 grep -Fq 'bash scripts/start-devspace.sh' "$WORKFLOW" || \
   fail 'workflow does not start DevSpace'
-
 if grep -Eq 'GITHUB_OUTPUT.*(MCP|DEVSPACE|OWNER|PUBLIC)' "$WORKFLOW"; then
   fail 'DevSpace connection material must not use workflow outputs'
 fi
@@ -289,7 +277,6 @@ grep -Fq 'connection.txt' "$DEVSPACE_SCRIPT" || \
   fail 'DevSpace connection material is not written locally'
 grep -Fq 'chmod 0600' "$DEVSPACE_SCRIPT" || \
   fail 'DevSpace connection material does not receive private permissions'
-
 if grep -Eq '(^|[[:space:]])(set -x|printenv)([[:space:]]|$)' "$DEVSPACE_SCRIPT"; then
   fail 'DevSpace launcher contains a command that can expose secrets'
 fi
