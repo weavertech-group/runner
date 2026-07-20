@@ -171,9 +171,13 @@ password, keyboard-interactive, and root login remain disabled. Tailscale SSH
 is not enabled in this fallback mode because it owns tailnet TCP port 22 and
 would bypass `authorized_keys`.
 
-The session step sleeps for four hours. The job timeout is 330 minutes. Ending
-or cancelling the workflow destroys the GitHub-hosted runner and its Git
-credential file; the cleanup step also attempts an immediate Headscale logout.
+The session step waits indefinitely and the job timeout is 360 minutes, so the
+runner stays online until GitHub enforces its six-hour hosted-job limit. Setup
+time is part of that limit, so usable SSH time is slightly less than six full
+hours. Ending or cancelling the workflow destroys the GitHub-hosted runner and
+its Git credential file; when GitHub gives finalization steps time to run, the
+cleanup step also attempts an immediate Headscale logout. Otherwise Headscale's
+ephemeral-node inactivity cleanup removes the disconnected node.
 
 ## Error codes
 

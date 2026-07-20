@@ -40,6 +40,12 @@ grep -Fq 'HEADSCALE_MAGIC_DNS_DOMAIN: ${{ secrets.HEADSCALE_MAGIC_DNS_DOMAIN }}'
 grep -Fq 'deployment: false' "$WORKFLOW" || \
   fail 'session jobs must not create public deployment records'
 
+grep -Fq 'timeout-minutes: 360' "$WORKFLOW" || \
+  fail 'session job must use the full GitHub-hosted six-hour limit'
+
+grep -Fq 'run: sleep infinity' "$WORKFLOW" || \
+  fail 'session must wait for platform termination instead of exiting early'
+
 grep -Fq 'inputs.target_repo' "$WORKFLOW" && \
   fail 'real repository names must not come from public workflow inputs'
 

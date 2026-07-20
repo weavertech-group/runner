@@ -56,7 +56,9 @@ jobs:
     name: Session
     needs: resolve-target
     runs-on: ubuntu-latest
-    timeout-minutes: 330
+    # GitHub-hosted jobs have a hard six-hour execution limit. Keep the runner
+    # alive until the platform terminates the job instead of exiting early.
+    timeout-minutes: 360
     environment:
       name: ${{ needs.resolve-target.outputs.environment_name }}
       deployment: false
@@ -92,7 +94,7 @@ jobs:
       - name: Execute
         if: ${{ inputs.enable_ssh }}
         shell: bash
-        run: sleep 4h
+        run: sleep infinity
 
       - name: Finalize
         if: ${{ always() }}
