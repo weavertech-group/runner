@@ -44,9 +44,10 @@ main() {
 
   local command_name=''
   for command_name in \
-    bat cargo claude codex corepack direnv fd fzf go htop lsof migrate mise \
-    node npm npx playwright pnpm python rg rustc socat terraform tmux tofu tree \
-    uv yarn kubectl kubectl-ctx kubectl-ns kubectl-neat runner-bootstrap; do
+    bat cargo claude codex corepack direnv fd fzf go htop kubectx kubens lsof \
+    migrate mise node npm npx playwright pnpm python rg rustc socat terraform \
+    tmux tofu tree uv yarn kubectl kubectl-ctx kubectl-ns kubectl-neat \
+    runner-bootstrap; do
     require_command "$command_name"
   done
 
