@@ -1,0 +1,32 @@
+{
+  // Replace these example identities. Keep real member identities out of this
+  // public repository; deploy the resulting policy on the Headscale host.
+  "groups": {
+    "group:platform-admins": [
+      "operator@example.com"
+    ]
+  },
+
+  "tagOwners": {
+    "tag:gha-runner": [
+      "group:platform-admins"
+    ]
+  },
+
+  "grants": [
+    {
+      "src": ["group:platform-admins"],
+      "dst": ["tag:gha-runner"],
+      "ip": ["tcp:22"]
+    }
+  ],
+
+  "ssh": [
+    {
+      "action": "accept",
+      "src": ["group:platform-admins"],
+      "dst": ["tag:gha-runner"],
+      "users": ["runner"]
+    }
+  ]
+}

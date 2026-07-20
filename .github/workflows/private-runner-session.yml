@@ -1,0 +1,99 @@
+name: Private Runner Session
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_repo:
+        description: Optional public owner/repo identifier
+        required: false
+        type: string
+      enable_ssh:
+        description: Enable private SSH access
+        required: false
+        default: true
+        type: boolean
+      ssh_public_key:
+        description: Optional fallback Ed25519 public key
+        required: false
+        type: string
+
+run-name: Private runner session
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: private-runner-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  resolve-target:
+    name: Resolve target
+    runs-on: ubuntu-latest
+    outputs:
+      environment_name: ${{ steps.resolve.outputs.environment_name }}
+    steps:
+      - name: Prepare
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Resolve target
+        id: resolve
+        shell: bash
+        env:
+          TARGET_REPO: ${{ inputs.target_repo }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          environment_name="$(bash scripts/session-lib.sh resolve-target \
+            "$TARGET_REPO" .github/target-repositories.txt)"
+          bash scripts/verify-environment.sh "$environment_name"
+          printf 'environment_name=%s\n' "$environment_name" >> "$GITHUB_OUTPUT"
+
+  runner:
+    name: Session
+    needs: resolve-target
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    environment:
+      name: ${{ needs.resolve-target.outputs.environment_name }}
+    steps:
+      - name: Prepare
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Prepare network
+        if: ${{ inputs.enable_ssh }}
+        shell: bash
+        run: bash scripts/install-tailscale.sh
+
+      - name: Connect
+        if: ${{ inputs.enable_ssh }}
+        shell: bash
+        env:
+          HEADSCALE_URL: ${{ vars.HEADSCALE_URL }}
+          HEADSCALE_MAGIC_DNS_DOMAIN: ${{ vars.HEADSCALE_MAGIC_DNS_DOMAIN }}
+          HEADSCALE_AUTHKEY: ${{ secrets.HEADSCALE_AUTHKEY }}
+          SSH_PUBLIC_KEY: ${{ inputs.ssh_public_key }}
+        run: bash scripts/connect-headscale.sh
+
+      - name: Prepare repository access
+        if: ${{ inputs.target_repo != '' }}
+        shell: bash
+        env:
+          TARGET_REPO: ${{ inputs.target_repo }}
+          TARGET_REPO_AUTH: ${{ secrets.TARGET_REPO_AUTH }}
+        run: bash scripts/configure-repository-credential.sh
+
+      - name: Execute
+        if: ${{ inputs.enable_ssh }}
+        shell: bash
+        run: sleep 4h
+
+      - name: Finalize
+        if: ${{ always() }}
+        shell: bash
+        run: bash scripts/cleanup.sh

@@ -1,0 +1,3 @@
+# Test-only allowlist.
+alice/private-api repo--alice--private-api
+team/web-console repo--team--web-console

@@ -1,0 +1,5 @@
+# One entry per allowed target. Keep the environment name explicit to avoid
+# ambiguous owner/repository-to-environment conversions.
+#
+# owner/repository repo--owner--repository
+# alice/private-api repo--alice--private-api

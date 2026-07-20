@@ -1,0 +1,5 @@
+# Replace or extend this owner with the team that approves security-sensitive changes.
+/.github/workflows/ @bef0rewind
+/.github/target-repositories.txt @bef0rewind
+/scripts/ @bef0rewind
+/headscale/ @bef0rewind
