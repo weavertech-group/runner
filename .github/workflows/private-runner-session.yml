@@ -35,7 +35,7 @@ concurrency:
 jobs:
   resolve-target:
     name: Resolve target
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       environment_name: ${{ steps.resolve.outputs.environment_name }}
     steps:
@@ -60,7 +60,7 @@ jobs:
   runner:
     name: Session
     needs: resolve-target
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # GitHub-hosted jobs have a hard six-hour execution limit. Keep the runner
     # alive until the platform terminates the job instead of exiting early.
     timeout-minutes: 360
@@ -83,7 +83,7 @@ jobs:
       - name: Prepare Node runtime
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 22.19.0
+          node-version: 22.22.2
 
       - name: Install Codex CLI
         shell: bash
