@@ -89,6 +89,10 @@ jobs:
         shell: bash
         run: npm install -g @openai/codex
 
+      - name: Install Claude Code
+        shell: bash
+        run: npm install -g @anthropic-ai/claude-code
+
       - name: Prepare network
         if: ${{ inputs.enable_ssh }}
         shell: bash
