@@ -34,8 +34,9 @@ grep -Fq 'TARGET_REPO: ${{ secrets.TARGET_REPO }}' "$WORKFLOW" || \
 grep -Fq 'HEADSCALE_URL: ${{ secrets.HEADSCALE_URL }}' "$WORKFLOW" || \
   fail 'Headscale URL must be masked as sensitive metadata'
 
-grep -Fq 'HEADSCALE_MAGIC_DNS_DOMAIN: ${{ secrets.HEADSCALE_MAGIC_DNS_DOMAIN }}' "$WORKFLOW" || \
-  fail 'MagicDNS domain must be masked as sensitive metadata'
+if grep -Fq 'HEADSCALE_MAGIC_DNS_DOMAIN' "$WORKFLOW"; then
+  fail 'runner workflow must not depend on a MagicDNS domain secret'
+fi
 
 grep -Fq 'deployment: false' "$WORKFLOW" || \
   fail 'session jobs must not create public deployment records'
@@ -75,5 +76,12 @@ fi
 
 grep -Fq 'tailscale status --json' "$CONNECT_SCRIPT" || \
   fail 'daemon readiness must work before the node is logged in'
+
+grep -Fq -- '--accept-dns=false' "$CONNECT_SCRIPT" || \
+  fail 'runner must not install tailnet DNS settings'
+
+if grep -Eq 'HEADSCALE_MAGIC_DNS_DOMAIN|DNSName|runner-fqdn' "$CONNECT_SCRIPT"; then
+  fail 'runner connection must not validate or persist MagicDNS names'
+fi
 
 printf 'workflow security tests passed\n'

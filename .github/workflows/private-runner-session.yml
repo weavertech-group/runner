@@ -78,7 +78,6 @@ jobs:
         shell: bash
         env:
           HEADSCALE_URL: ${{ secrets.HEADSCALE_URL }}
-          HEADSCALE_MAGIC_DNS_DOMAIN: ${{ secrets.HEADSCALE_MAGIC_DNS_DOMAIN }}
           HEADSCALE_AUTHKEY: ${{ secrets.HEADSCALE_AUTHKEY }}
           SSH_PUBLIC_KEY: ${{ inputs.ssh_public_key }}
         run: bash scripts/connect-headscale.sh

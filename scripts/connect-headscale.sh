@@ -21,11 +21,6 @@ if [[ ! "$headscale_url" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?$ ]]; then
   printf 'E21\n' >&2
   exit 21
 fi
-if [[ ! "${HEADSCALE_MAGIC_DNS_DOMAIN-}" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]]; then
-  printf 'E23\n' >&2
-  exit 23
-fi
-
 printf '::add-mask::%s\n' "$HEADSCALE_AUTHKEY"
 
 if ! health_status="$(curl \
@@ -80,7 +75,7 @@ up_args=(
   --login-server="$headscale_url"
   --auth-key="$HEADSCALE_AUTHKEY"
   --hostname="$node_name"
-  --accept-dns=true
+  --accept-dns=false
   --timeout=2m
 )
 
@@ -96,24 +91,6 @@ if ! sudo tailscale up "${up_args[@]}" >"$connect_log" 2>&1; then
   exit 22
 fi
 
-if ! sudo tailscale status --json >"$status_file" 2>>"$connect_log"; then
-  printf 'E23\n' >&2
-  exit 23
-fi
-
-fqdn="$(jq -er '.Self.DNSName | strings | select(length > 1) | rtrimstr(".")' "$status_file" 2>/dev/null)" || {
-  printf 'E23\n' >&2
-  exit 23
-}
-
-if [[ "$fqdn" != *".${HEADSCALE_MAGIC_DNS_DOMAIN}" ]]; then
-  printf 'E23\n' >&2
-  exit 23
-fi
-
-printf '%s\n' "$fqdn" > "$diagnostic_dir/runner-fqdn"
-chmod 600 "$diagnostic_dir/runner-fqdn" "$status_file"
-
 if [[ -z "$public_key" ]]; then
   if ! sudo tailscale set --ssh=true >>"$connect_log" 2>&1; then
     printf 'E24\n' >&2
@@ -124,6 +101,12 @@ else
   install -d -m 700 "$HOME/.ssh"
   printf '%s\n' "$public_key" >> "$HOME/.ssh/authorized_keys"
   chmod 600 "$HOME/.ssh/authorized_keys"
+
+  if ! sudo tailscale status --json >"$status_file" 2>>"$connect_log"; then
+    printf 'E24\n' >&2
+    exit 24
+  fi
+  chmod 600 "$status_file"
 
   tailnet_ipv4="$(jq -er \
     '[.Self.TailscaleIPs[] | select(test("^[0-9]+\\."))][0]' \

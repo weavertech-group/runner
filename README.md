@@ -12,7 +12,7 @@ run issue agents, create pull requests, or implement a task queue.
 
 - Unique node name: `gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}`.
 - Pinned Tailscale `1.94.2` Linux binary with an embedded SHA-256 check.
-- Headscale URL override, MagicDNS validation, and Tailscale SSH by default.
+- Headscale URL override and Tailscale SSH without changing runner DNS.
 - Optional Ed25519 public-key mode using system OpenSSH on the tailnet only.
 - Public opaque-ID allowlist and one GitHub Environment per target repository.
 - A path-scoped Git credential store for the selected repository only.
@@ -45,9 +45,9 @@ members of `group:platform-admins`; add explicit CIDR destinations for any
 existing subnet routes.
 
 The policy example also enables the `magicdns-aaaa` node attribute. Keep this
-when the Headscale IPv6 pool is enabled: it lets MagicDNS clients use the
-tailnet IPv6 address if a local network incorrectly claims the CGNAT
-`100.64.0.0/10` range.
+for clients that choose to use MagicDNS when the Headscale IPv6 pool is
+enabled. Runner sessions and workstations that coexist with Quantumult X do
+not install these DNS settings into the operating system.
 
 Create a dedicated tagged, reusable, ephemeral, pre-authorized key. Confirm the
 flags against the installed version:
@@ -62,8 +62,10 @@ headscale preauthkeys create \
   --expiration 720h
 ```
 
-Team workstations must join the same Headscale network, accept its DNS settings,
-and be included in `group:platform-admins` (or the replacement group).
+Team workstations must join the same Headscale network and be included in
+`group:platform-admins` (or the replacement group). A workstation that
+coexists with Quantumult X must join with `--accept-dns=false` so Quantumult X
+remains the only manager of system DNS.
 
 Give each person a separate Headscale user. On Headscale versions without a
 node-owner transfer command, an existing device must reauthenticate under its
@@ -81,14 +83,13 @@ and any routes before deleting or expiring the old node record.
 
 ### 2. Configure repository settings
 
-Create these repository-level Actions secrets. The URL and DNS suffix are
-sensitive metadata rather than authentication credentials, but storing them as
-secrets gives them the same automatic log masking as other Actions secrets.
+Create this repository-level Actions secret. The URL is sensitive metadata
+rather than an authentication credential, but storing it as a secret gives it
+the same automatic log masking as other Actions secrets.
 
 | Kind | Name | Value |
 | --- | --- | --- |
 | Secret | `HEADSCALE_URL` | The externally reachable HTTPS control URL |
-| Secret | `HEADSCALE_MAGIC_DNS_DOMAIN` | The private MagicDNS suffix |
 
 Do not create repository-level `HEADSCALE_AUTHKEY`, because any other trusted
 workflow in the repository could reference it. Create a GitHub Environment
@@ -144,17 +145,31 @@ From the Actions UI, choose **Private Runner Session** and dispatch it. The
 optional `target_id` value must match the opaque allowlist. Leave `ssh_public_key`
 empty for the default Tailscale SSH mode.
 
-The host is:
+The node name is:
 
 ```text
-gha-<run-id>-<run-attempt>.<magic-dns-domain>
+gha-<run-id>-<run-attempt>
 ```
 
-Connect from an authorized workstation:
+On macOS workstations that run Quantumult X, use the Homebrew/open-source
+`tailscaled` client and prevent it from changing system DNS:
 
 ```bash
-ssh runner@gha-<run-id>-<run-attempt>.mesh.example.net
+sudo tailscale set --accept-dns=false
 ```
+
+Connect through the Tailscale CLI. It resolves the node from the local
+Tailscale daemon and does not require macOS system DNS or an SSH config alias:
+
+```bash
+tailscale ssh runner@gha-<run-id>-<run-attempt>
+```
+
+Do not enable **Use Tailscale DNS settings**, add a Quantumult X DNS override,
+create `/etc/resolver` entries, or pin ephemeral runner addresses in
+`~/.ssh/config`. Headscale MagicDNS remains enabled for other clients that want
+it; these workstations and the GitHub-hosted runner simply decline its system
+DNS configuration.
 
 When a target was selected, Git is configured from the protected `TARGET_REPO`
 secret and returns the token only for that repository path. An authorized
@@ -169,7 +184,8 @@ Supplying `ssh_public_key` switches the session to system OpenSSH. Only
 `ssh-ed25519` and `sk-ssh-ed25519@openssh.com` single-line keys are accepted;
 password, keyboard-interactive, and root login remain disabled. Tailscale SSH
 is not enabled in this fallback mode because it owns tailnet TCP port 22 and
-would bypass `authorized_keys`.
+would bypass `authorized_keys`. Find the current runner address with
+`tailscale status`, then connect to that address with regular `ssh`.
 
 The session step waits indefinitely and the job timeout is 360 minutes, so the
 runner stays online until GitHub enforces its six-hour hosted-job limit. Setup
@@ -191,7 +207,6 @@ Only stable error codes are printed publicly:
 | `E20` | Tailscale download, checksum, or install failure | runner |
 | `E21` | invalid HTTPS URL, unhealthy control plane, or daemon startup failure | runner |
 | `E22` | registration rejected after a successful Headscale health check | runner |
-| `E23` | MagicDNS name missing or has the wrong suffix | runner |
 | `E24` | selected SSH server cannot be enabled | runner |
 | `E25` | Headscale grant or SSH policy denies the member | SSH client/policy logs |
 | `E30` | fallback SSH public key is invalid | runner |
