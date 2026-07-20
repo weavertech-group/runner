@@ -11,17 +11,41 @@ SECURITY_POLICY="$ROOT_DIR/SECURITY.md"
 CLOUDFLARED_SCRIPT="$ROOT_DIR/scripts/install-cloudflared.sh"
 DEVSPACE_SCRIPT="$ROOT_DIR/scripts/start-devspace.sh"
 CLEANUP_SCRIPT="$ROOT_DIR/scripts/cleanup.sh"
+DEVELOPMENT_SETUP="$ROOT_DIR/scripts/setup-development-environment.sh"
+DEVELOPMENT_VERIFY="$ROOT_DIR/scripts/verify-development-environment.sh"
+DEVELOPMENT_VERSIONS="$ROOT_DIR/scripts/development-versions.env"
+PROJECT_BOOTSTRAP="$ROOT_DIR/scripts/bootstrap-project.sh"
 
 fail() {
   printf 'FAIL: %s\n' "$1" >&2
   exit 1
 }
 
-[[ -f "$WORKFLOW" ]] || fail 'workflow is missing'
-[[ -f "$CODEOWNERS" ]] || fail 'CODEOWNERS is missing'
-[[ -f "$SECURITY_POLICY" ]] || fail 'security policy is missing'
-[[ -f "$CLOUDFLARED_SCRIPT" ]] || fail 'cloudflared installer is missing'
-[[ -f "$DEVSPACE_SCRIPT" ]] || fail 'DevSpace launcher is missing'
+require_file() {
+  [[ -f "$1" ]] || fail "$2"
+}
+
+require_unconditional_step() {
+  local start="$1"
+  local end="$2"
+  local message="$3"
+  local block=''
+  block="$(sed -n "/- name: $start/,/- name: $end/p" "$WORKFLOW")"
+  [[ -n "$block" ]] || fail "$message is missing"
+  if grep -Fq 'if:' <<< "$block"; then
+    fail "$message must run for every valid runner session"
+  fi
+}
+
+require_file "$WORKFLOW" 'workflow is missing'
+require_file "$CODEOWNERS" 'CODEOWNERS is missing'
+require_file "$SECURITY_POLICY" 'security policy is missing'
+require_file "$CLOUDFLARED_SCRIPT" 'cloudflared installer is missing'
+require_file "$DEVSPACE_SCRIPT" 'DevSpace launcher is missing'
+require_file "$DEVELOPMENT_SETUP" 'development environment installer is missing'
+require_file "$DEVELOPMENT_VERIFY" 'development environment verifier is missing'
+require_file "$DEVELOPMENT_VERSIONS" 'development version manifest is missing'
+require_file "$PROJECT_BOOTSTRAP" 'project bootstrap command is missing'
 
 grep -Fq 'workflow_dispatch:' "$WORKFLOW" || \
   fail 'privileged workflow must remain manually dispatched'
@@ -114,29 +138,130 @@ fi
 
 grep -Fq 'enable_devspace:' "$WORKFLOW" || \
   fail 'DevSpace must remain an explicit workflow opt-in'
+if grep -Fq 'runs-on: ubuntu-latest' "$WORKFLOW"; then
+  fail 'runner image must use the explicit Ubuntu 24.04 label'
+fi
+[[ "$(grep -Fc 'runs-on: ubuntu-24.04' "$WORKFLOW")" -eq 2 ]] || \
+  fail 'both jobs must use Ubuntu 24.04'
 grep -Fq 'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020' "$WORKFLOW" || \
   fail 'session Node runtime action is not pinned'
-grep -Fq 'node-version: 22.19.0' "$WORKFLOW" || \
+grep -Fq 'node-version: 22.22.2' "$WORKFLOW" || \
   fail 'session Node runtime version is not fixed'
-grep -Fq 'run: npm install -g @openai/codex' "$WORKFLOW" || \
-  fail 'Codex CLI is not installed for runner sessions'
-grep -Fq 'run: npm install -g @anthropic-ai/claude-code' "$WORKFLOW" || \
-  fail 'Claude Code is not installed for runner sessions'
+grep -Fq 'run: bash scripts/setup-development-environment.sh' "$WORKFLOW" || \
+  fail 'development environment is not installed for runner sessions'
+grep -Fq 'run: npm install -g @openai/codex@latest' "$WORKFLOW" || \
+  fail 'Codex CLI must explicitly track npm latest'
+grep -Fq 'run: npm install -g @anthropic-ai/claude-code@latest' "$WORKFLOW" || \
+  fail 'Claude Code must explicitly track npm latest'
+grep -Fq 'run: bash scripts/verify-development-environment.sh' "$WORKFLOW" || \
+  fail 'development environment is not verified before network setup'
 
-node_runtime_step="$(sed -n '/- name: Prepare Node runtime/,/- name: Install Codex CLI/p' "$WORKFLOW")"
-if grep -Fq 'if:' <<< "$node_runtime_step"; then
-  fail 'Node runtime must be prepared for every valid runner session'
+require_unconditional_step 'Prepare Node runtime' 'Install development environment' \
+  'Node runtime preparation'
+require_unconditional_step 'Install development environment' 'Install Codex CLI' \
+  'development environment installation'
+require_unconditional_step 'Install Codex CLI' 'Install Claude Code' \
+  'Codex CLI installation'
+require_unconditional_step 'Install Claude Code' 'Verify development environment' \
+  'Claude Code installation'
+require_unconditional_step 'Verify development environment' 'Prepare network' \
+  'development environment verification'
+
+# shellcheck source=../scripts/development-versions.env
+source "$DEVELOPMENT_VERSIONS"
+[[ "$NODE_VERSION" == '22.22.2' ]] || fail 'Node version is not pinned'
+[[ "$COREPACK_VERSION" == '0.35.0' ]] || fail 'Corepack version is not pinned'
+[[ "$PNPM_VERSION" == '11.4.0' ]] || fail 'pnpm version is not pinned'
+[[ "$YARN_VERSION" == '4.17.1' ]] || fail 'Yarn version is not pinned'
+[[ "$UV_VERSION" == '0.11.16' ]] || fail 'uv version is not pinned'
+[[ "$MISE_VERSION" == 'v2026.7.0' ]] || fail 'mise version is not pinned'
+[[ "$PYTHON_VERSION" == '3.14.6' ]] || fail 'Python version is not pinned'
+[[ "$GO_VERSION" == '1.26.5' ]] || fail 'Go version is not pinned'
+[[ "$RUST_VERSION" == '1.97.1' ]] || fail 'Rust version is not pinned'
+[[ "$TERRAFORM_VERSION" == '1.15.5' ]] || fail 'Terraform version is not pinned'
+[[ "$OPENTOFU_VERSION" == '1.11.7' ]] || fail 'OpenTofu version is not pinned'
+[[ "$PLAYWRIGHT_VERSION" == '1.60.0' ]] || fail 'Playwright version is not pinned'
+[[ "$MIGRATE_VERSION" == '4.19.1' ]] || fail 'database migration tool version is not pinned'
+if grep -Eq 'CODEX|CLAUDE|@openai/codex|@anthropic-ai/claude-code' "$DEVELOPMENT_VERSIONS"; then
+  fail 'Codex and Claude must not be pinned in the development version manifest'
 fi
 
-codex_install_step="$(sed -n '/- name: Install Codex CLI/,/- name: Install Claude Code/p' "$WORKFLOW")"
-if grep -Fq 'if:' <<< "$codex_install_step"; then
-  fail 'Codex CLI must be installed for every valid runner session'
-fi
+for package in bat direnv fd-find fzf htop lsof ripgrep socat tmux tree; do
+  grep -Eq "^[[:space:]]+${package}([[:space:]]*\\\\)?$" "$DEVELOPMENT_SETUP" || \
+    fail "$package is missing from the base development tools"
+done
 
-claude_install_step="$(sed -n '/- name: Install Claude Code/,/- name: Prepare network/p' "$WORKFLOW")"
-if grep -Fq 'if:' <<< "$claude_install_step"; then
-  fail 'Claude Code must be installed for every valid runner session'
+grep -Fq '/usr/bin/fdfind /usr/local/bin/fd' "$DEVELOPMENT_SETUP" || \
+  fail 'fd compatibility command is missing'
+grep -Fq '/usr/bin/batcat /usr/local/bin/bat' "$DEVELOPMENT_SETUP" || \
+  fail 'bat compatibility command is missing'
+grep -Fq 'direnv hook bash' "$DEVELOPMENT_SETUP" || \
+  fail 'direnv is not enabled for SSH Bash sessions'
+grep -Fq 'releases/download/${UV_VERSION}/uv-installer.sh' "$DEVELOPMENT_SETUP" || \
+  fail 'uv installer URL is not versioned'
+grep -Fq 'jdx/mise/releases/download/${MISE_VERSION}/install.sh' "$DEVELOPMENT_SETUP" || \
+  fail 'mise installer URL is not versioned'
+grep -Fq 'corepack@${COREPACK_VERSION}' "$DEVELOPMENT_SETUP" || \
+  fail 'Corepack version is not applied'
+grep -Fq 'pnpm@${PNPM_VERSION}' "$DEVELOPMENT_SETUP" || \
+  fail 'pnpm version is not applied'
+grep -Fq 'yarn@${YARN_VERSION}' "$DEVELOPMENT_SETUP" || \
+  fail 'Yarn version is not applied'
+for tool in python go rust terraform opentofu; do
+  grep -Fq "$tool = \"\${${tool^^}_VERSION}\"" "$DEVELOPMENT_SETUP" 2>/dev/null || true
+done
+grep -Fq 'python = "${PYTHON_VERSION}"' "$DEVELOPMENT_SETUP" || \
+  fail 'Python version is not managed by mise'
+grep -Fq 'go = "${GO_VERSION}"' "$DEVELOPMENT_SETUP" || \
+  fail 'Go version is not managed by mise'
+grep -Fq 'rust = "${RUST_VERSION}"' "$DEVELOPMENT_SETUP" || \
+  fail 'Rust version is not managed by mise'
+grep -Fq 'terraform = "${TERRAFORM_VERSION}"' "$DEVELOPMENT_SETUP" || \
+  fail 'Terraform version is not managed by mise'
+grep -Fq 'opentofu = "${OPENTOFU_VERSION}"' "$DEVELOPMENT_SETUP" || \
+  fail 'OpenTofu version is not managed by mise'
+grep -Fq '@playwright/test@${PLAYWRIGHT_VERSION}' "$DEVELOPMENT_SETUP" || \
+  fail 'Playwright version is not applied'
+grep -Fq 'playwright install --with-deps chromium' "$DEVELOPMENT_SETUP" || \
+  fail 'Playwright Chromium is not installed'
+grep -Fq 'golang-migrate/migrate/v4/cmd/migrate@v${MIGRATE_VERSION}' "$DEVELOPMENT_SETUP" || \
+  fail 'database migration CLI is not installed at a pinned version'
+grep -Fq 'sha256sum --check --status' "$DEVELOPMENT_SETUP" || \
+  fail 'downloaded Kubernetes plugins are not checksum verified'
+for plugin in kubectl-ctx kubectl-ns kubectl-neat; do
+  grep -Fq "/usr/local/bin/$plugin" "$DEVELOPMENT_SETUP" || \
+    fail "$plugin is not installed"
+done
+
+grep -Fq 'runner-bootstrap' "$DEVELOPMENT_SETUP" || \
+  fail 'project bootstrap helper is not installed'
+if grep -Fq 'bootstrap-project.sh' "$WORKFLOW"; then
+  fail 'project dependency installation must remain an explicit operator action'
 fi
+for command in 'mise install' 'corepack pnpm install --frozen-lockfile' \
+  'corepack yarn install --immutable' 'npm ci' 'uv sync --frozen' \
+  'go mod download' 'cargo fetch --locked' 'playwright install --with-deps chromium'; do
+  grep -Fq "$command" "$PROJECT_BOOTSTRAP" || \
+    fail "project bootstrap is missing: $command"
+done
+
+grep -Fq 'codex --version' "$DEVELOPMENT_VERIFY" || \
+  fail 'Codex installation is not verified'
+grep -Fq 'claude --version' "$DEVELOPMENT_VERIFY" || \
+  fail 'Claude installation is not verified'
+grep -Fq 'persist_node_commands' "$DEVELOPMENT_VERIFY" || \
+  fail 'Node-installed commands are not persisted for SSH sessions'
+grep -Fq 'go version -m' "$DEVELOPMENT_VERIFY" || \
+  fail 'database migration CLI module version is not verified'
+grep -Fq 'kubectl plugin list' "$DEVELOPMENT_VERIFY" || \
+  fail 'Kubernetes plugins are not verified'
+
+for script in "$DEVELOPMENT_SETUP" "$DEVELOPMENT_VERIFY" "$PROJECT_BOOTSTRAP"; do
+  bash -n "$script" || fail "shell syntax check failed: $script"
+  if grep -Eq '(^|[[:space:]])(set -x|printenv)([[:space:]]|$)' "$script"; then
+    fail "development script can expose secrets: $script"
+  fi
+done
 
 grep -Fq 'bash scripts/install-cloudflared.sh' "$WORKFLOW" || \
   fail 'workflow does not install the pinned tunnel binary'
