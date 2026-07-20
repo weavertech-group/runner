@@ -1,35 +1,31 @@
-# Private runner operations runbook
+# 私有 Runner 运维手册
 
-This runbook covers the repeatable operation of the public GitHub Actions
-workflow in this repository. It intentionally contains no real control-plane
-hostname, IP address, person name, private repository name, credential, node
-identifier, workflow run identifier, or workstation path.
+本手册说明如何重复执行本公开 GitHub Actions workflow 的运维操作。本文刻意
+不包含真实的控制平面域名、IP 地址、成员姓名、私有仓库名、凭证、节点标识、
+workflow run ID 或工作站本机路径。
 
-Use private inventory or a password manager for deployment-specific values.
-Do not copy those values into this repository, workflow inputs, run names,
-step names, Actions summaries, artifacts, issues, or pull requests.
+部署相关的真实值应保存在私有资产清单或密码管理器中。不要将这些值复制到本
+仓库、workflow inputs、run 名称、step 名称、Actions summary、artifact、
+issue 或 pull request 中。
 
-## Operating model
+## 运行模型
 
-The workflow creates a temporary GitHub-hosted Ubuntu machine, joins it to a
-private Headscale network with a tagged reusable ephemeral preauth key, enables
-Tailscale SSH, and waits until the job is cancelled or reaches GitHub's hosted
-job limit.
+Workflow 会创建一台临时 GitHub-hosted Ubuntu 机器，使用带 tag、可复用且
+ephemeral 的 preauth key 加入私有 Headscale 网络，启用 Tailscale SSH，然后
+等待 job 被取消或达到 GitHub-hosted job 时长限制。
 
-The supported access path is:
+支持的访问路径为：
 
 ```text
-authorized workstation -> private tailnet -> ephemeral runner
+已授权工作站 -> 私有 tailnet -> 临时 runner
 ```
 
-There is no public SSH listener. The runner and Quantumult X workstations do
-not install Headscale DNS settings into the operating system. Headscale
-MagicDNS remains enabled for other clients that choose to use it.
+Runner 不开放公网 SSH。Runner 和与 Quantumult X 共存的工作站不把 Headscale
+DNS 设置写入操作系统。Headscale MagicDNS 继续为选择使用它的其他客户端启用。
 
-## Privacy boundaries
+## 隐私边界
 
-The following names are public configuration and may appear in this
-repository:
+以下名称属于公开配置，可以出现在本仓库中：
 
 - `tag:gha-runner`
 - `runner`
@@ -37,32 +33,31 @@ repository:
 - `HEADSCALE_AUTHKEY`
 - `TARGET_REPO`
 - `TARGET_REPO_AUTH`
-- opaque target IDs such as `repo-01`
-- Environment names such as `session--repo-01`
+- `repo-01` 之类的不透明 target ID
+- `session--repo-01` 之类的 Environment 名称
 
-Treat all corresponding values as private. In particular, keep these out of
-the public repository and public Actions logs:
+对应的值均应视为私密信息。尤其不要让以下内容出现在公开仓库或公开 Actions
+日志中：
 
-- the real Headscale URL and tailnet DNS suffix;
-- preauth keys, GitHub tokens, SSH private keys, and proxy credentials;
-- real member identities and private policy membership;
-- private target repository names;
-- node addresses, status JSON, internal routes, and detailed diagnostics.
+- 真实 Headscale URL 和 tailnet DNS 后缀；
+- preauth key、GitHub token、SSH 私钥和代理凭证；
+- 真实成员身份和私有 policy 成员关系；
+- 私有目标仓库名称；
+- 节点地址、完整 status JSON、内部路由和详细诊断信息。
 
-Local private copies may use the ignored files described by `.gitignore`.
-Keep their mode at `0600` and never force-add them to Git.
+本地私有副本可以使用 `.gitignore` 中声明的忽略文件。其权限应保持为 `0600`，
+且绝不能使用 Git 强制添加。
 
-## One-time Headscale setup
+## 一次性 Headscale 配置
 
-1. Merge `headscale/config.example.yaml` into the private deployment.
-2. Copy `headscale/policy.example.hujson` to a private policy file.
-3. Replace example identities and host aliases using private inventory.
-4. Apply `disable-ipv4` only to workstations whose IPv4 routing conflicts with
-   another tunnel, and to `tag:gha-runner` when those workstations must access
-   runners over IPv6.
-5. Validate configuration and policy before activating either one.
+1. 将 `headscale/config.example.yaml` 合并到私有部署配置中。
+2. 将 `headscale/policy.example.hujson` 复制为私有 policy 文件。
+3. 根据私有资产清单替换示例身份和 host alias。
+4. 只对 IPv4 路由与另一个隧道冲突的工作站应用 `disable-ipv4`；当这些工作站
+   需要访问 runner 时，也对 `tag:gha-runner` 应用该属性。
+5. 启用配置和 policy 前分别执行校验。
 
-For the container deployment used by this project, the validation shape is:
+对于本项目使用的容器部署，校验命令形式如下：
 
 ```bash
 HEADSCALE_ADMIN_HOST="<private-admin-host>"
@@ -74,52 +69,50 @@ ssh "$HEADSCALE_ADMIN_HOST" \
     --file /etc/headscale/policy.hujson'
 ```
 
-Do not publish the private policy: group membership, device aliases, addresses,
-and internal routes are operational metadata.
+不要公开私有 policy。组成员、设备 alias、地址和内部路由都属于运维元数据。
 
-### Create the runner preauth key
+### 创建 Runner preauth key
 
-Check the installed Headscale version before relying on flags:
+使用相关参数前先检查已安装 Headscale 版本：
 
 ```bash
 headscale preauthkeys create --help
 ```
 
-Create a dedicated key under a service user with these properties:
+在专用服务用户下创建具有以下属性的 key：
 
-- reusable;
-- ephemeral;
-- preauthorized;
-- tagged `tag:gha-runner`;
-- finite expiration.
+- reusable；
+- ephemeral；
+- preauthorized；
+- 带有 `tag:gha-runner`；
+- 有限有效期。
 
-Never use this key on a personal device. Record its expiration in private
-inventory and rotate it before expiry.
+绝不能在个人设备上使用该 key。将其过期时间记录在私有资产清单中，并在到期
+前轮换。
 
-## One-time GitHub setup
+## 一次性 GitHub 配置
 
-Create one repository-level Actions secret:
+创建一个 repository-level Actions secret：
 
-| Scope | Secret | Purpose |
+| Scope | Secret | 用途 |
 | --- | --- | --- |
-| Repository | `HEADSCALE_URL` | Headscale HTTPS control URL |
+| Repository | `HEADSCALE_URL` | Headscale HTTPS 控制端点 |
 
-Do not create a repository-level `HEADSCALE_AUTHKEY`.
+不要创建 repository-level `HEADSCALE_AUTHKEY`。
 
-Create Environment `session--none` for sessions without a target repository.
-It contains only:
+为不访问目标仓库的 session 创建 Environment `session--none`，其中只能包含：
 
 ```text
 HEADSCALE_AUTHKEY
 ```
 
-For each allowed target repository:
+针对每个允许的目标仓库：
 
-1. Allocate a public opaque ID; never derive it from the repository name.
-2. Create Environment `session--<opaque-id>`.
-3. Restrict the Environment to the protected default branch.
-4. Add required reviewers where appropriate and disable admin bypass.
-5. Add exactly these Environment secrets:
+1. 分配一个公开的不透明 ID，且绝不能从仓库名派生。
+2. 创建 Environment `session--<opaque-id>`。
+3. 将该 Environment 限制为受保护的默认分支。
+4. 根据需要添加 required reviewers，并关闭 admin bypass。
+5. 添加且仅添加以下 Environment secrets：
 
    ```text
    HEADSCALE_AUTHKEY
@@ -127,10 +120,10 @@ For each allowed target repository:
    TARGET_REPO_AUTH
    ```
 
-6. Give `TARGET_REPO_AUTH` access to only the repository in `TARGET_REPO`.
-7. Add only the opaque mapping to `.github/target-repositories.txt`.
+6. `TARGET_REPO_AUTH` 只能访问 `TARGET_REPO` 指定的单一仓库。
+7. 只把不透明映射加入 `.github/target-repositories.txt`。
 
-List secret names without retrieving their values:
+以下命令只列出 secret 名称，不读取其值：
 
 ```bash
 ORCHESTRATOR_REPO="<public-owner>/<public-repository>"
@@ -141,59 +134,52 @@ gh secret list --repo "$ORCHESTRATOR_REPO" --env session--none
 gh secret list --repo "$ORCHESTRATOR_REPO" --env "$TARGET_ENVIRONMENT"
 ```
 
-Expected isolation:
+预期隔离结果：
 
-- repository scope contains only `HEADSCALE_URL`;
-- `session--none` contains only `HEADSCALE_AUTHKEY`;
-- a target Environment contains one Headscale key, one repository identity,
-  and one repository credential;
-- no job receives credentials for multiple target repositories.
+- repository scope 只能包含 `HEADSCALE_URL`；
+- `session--none` 只能包含 `HEADSCALE_AUTHKEY`；
+- target Environment 包含一个 Headscale key、一个仓库身份和一个仓库凭证；
+- 任何 job 都不能同时获得多个目标仓库的凭证。
 
-## Workstation configuration
+## 工作站配置
 
-Give each operator a separate Headscale user. Do not share the runner key with
-operators.
+为每位操作者创建独立 Headscale 用户。不要与操作者共享 runner key。
 
-On a macOS workstation that coexists with Quantumult X, use the open-source
-Tailscale daemon, decline Headscale DNS, and decline routes advertised by other
-tailnet nodes:
+对于与 Quantumult X 共存的 macOS 工作站，使用开源 Tailscale daemon，拒绝
+Headscale DNS，并拒绝其他 tailnet 节点发布的路由：
 
 ```bash
 sudo tailscale set --accept-dns=false --accept-routes=false
 ```
 
-The daemon normally runs as a root LaunchDaemon; once installed, routine
-`tailscale` CLI use does not require sudo.
+Daemon 通常以 root LaunchDaemon 运行。安装完成后，日常使用 `tailscale` CLI
+不需要 sudo。
 
-Do not add any of the following compatibility workarounds:
+不要添加以下任何兼容性 workaround：
 
-- a tailnet domain in Quantumult X DNS rules;
-- tailnet IPv4 or IPv6 direct-routing rules in Quantumult X;
-- a domain-specific file under `/etc/resolver`;
-- an ephemeral runner hostname or address in `~/.ssh/config`;
-- the runner's MagicDNS suffix to public DNS.
+- 在 Quantumult X DNS 规则中添加 tailnet 域名；
+- 在 Quantumult X 中添加 tailnet IPv4 或 IPv6 直连规则；
+- 在 `/etc/resolver` 下添加特定域名文件；
+- 在 `~/.ssh/config` 中固定临时 runner 的 hostname 或地址；
+- 将 runner 的 MagicDNS 后缀加入公共 DNS。
 
-It is acceptable to retain the conflicting IPv4 range in Quantumult X's
-excluded routes; excluded traffic is handed to the underlay rather than owned
-by Quantumult X. The Headscale `disable-ipv4` policy removes that address family
-from the affected peers' netmaps, so Tailscale does not compete for it.
-Headscale's database may still display allocated IPv4 and IPv6 addresses;
-validate the client netmap with `tailscale status --json` instead.
+Quantumult X 的 excluded routes 中可以继续保留发生冲突的 IPv4 网段；被排除
+的流量会交给 underlay，而不是由 Quantumult X 自身接管。Headscale 的
+`disable-ipv4` policy 会从相关 peer 的 netmap 中移除该地址族，因此 Tailscale
+不会与其竞争。Headscale 数据库仍可能显示已分配的 IPv4 和 IPv6 地址；应使用
+`tailscale status --json` 验证客户端实际收到的 netmap。
 
-## Migrate from the App Store client
+## 从 App Store 客户端迁移
 
-This migration replaces the macOS Network Extension client with Homebrew
-`tailscaled`. It requires administrator authorization for the system
-LaunchDaemon and legacy network-service cleanup.
+该流程使用 Homebrew `tailscaled` 替换 macOS Network Extension 客户端。系统
+LaunchDaemon 和旧网络服务清理需要管理员授权。
 
-Before starting, create a short-lived, non-reusable personal preauth key. Note
-the old node ID privately, but do not delete it until the replacement has been
-verified.
+开始前，创建一个短期、不可复用的个人 preauth key。私下记录旧节点 ID，但在
+验证替代节点前不要删除旧节点。
 
-1. Stop the App Store Tailscale client and disable launch-at-login.
-2. Remove `Tailscale.app` through Finder. Confirm no Tailscale application is
-   running before continuing.
-3. Install and start the Homebrew daemon:
+1. 停止 App Store Tailscale 客户端，并关闭登录时启动。
+2. 通过 Finder 删除 `Tailscale.app`。继续前确认没有 Tailscale 应用进程运行。
+3. 安装并启动 Homebrew daemon：
 
    ```bash
    brew install tailscale
@@ -202,8 +188,8 @@ verified.
      grep -E 'state =|pid =|path ='
    ```
 
-4. Join Headscale with the replacement device name and the short-lived
-   personal key. Read the key without putting it in shell history:
+4. 使用替代设备名和短期个人 key 加入 Headscale。通过静默输入避免 key 进入
+   shell history：
 
    ```bash
    HEADSCALE_URL="<private-control-url>"
@@ -220,45 +206,44 @@ verified.
    unset PERSONAL_AUTHKEY
    ```
 
-5. Verify `tailscale status`, `tailscale debug prefs`, ordinary internet
-   access, Quantumult X, and access to an authorized tailnet peer.
-6. Confirm the replacement node owner on Headscale. Only then delete the old
-   node and the used personal key.
+5. 验证 `tailscale status`、`tailscale debug prefs`、普通互联网访问、
+   Quantumult X，以及对一个已授权 tailnet peer 的访问。
+6. 在 Headscale 上确认替代节点的 owner。只有完成确认后，才能删除旧节点和
+   已使用的个人 key。
 
-Remove App Store leftovers after the new daemon is healthy:
+新 daemon 健康后再删除 App Store 残留：
 
 ```bash
-# Confirm exactly one stale App Store VPN entry has this bundle ID.
+# 确认只有一个旧 App Store VPN 条目使用该 bundle ID。
 scutil --nc list | grep 'io.tailscale.ipn.macos'
 sudo networksetup -removenetworkservice Tailscale
 
-# Remove this directory only when it is empty.
+# 仅当此目录为空时删除。
 find /etc/resolver -mindepth 1 -maxdepth 1 -print
 sudo rmdir /etc/resolver
 ```
 
-`networksetup` deletes by display name, not bundle ID. Run it only when the
-preceding output identifies one stale App Store entry named `Tailscale` and the
-Homebrew daemon is already healthy. If the name is duplicated or ambiguous,
-remove the old VPN entry manually in System Settings instead.
+`networksetup` 根据显示名称而不是 bundle ID 删除服务。只有当前一条命令确认
+存在唯一、名为 `Tailscale` 的旧 App Store 条目，且 Homebrew daemon 已健康
+时，才能运行删除命令。如果名称重复或目标有歧义，应在 System Settings 中
+手工删除旧 VPN 条目。
 
-Move these obsolete App Store sandbox directories to Trash through Finder:
+通过 Finder 将以下过时 App Store sandbox 目录移入废纸篓：
 
 ```text
 ~/Library/Containers/io.tailscale.ipn.macos
 ~/Library/Containers/io.tailscale.ipn.macos.login-item-helper
 ```
 
-macOS may require Full Disk Access. Prefer Finder/Trash so the operation is
-recoverable; do not weaken system protection or recursively delete a broader
-Containers directory.
+macOS 可能要求 Full Disk Access。优先使用 Finder/废纸篓以便恢复；不要降低
+系统保护，也不要递归删除更上层的 Containers 目录。
 
-## Start a session
+## 启动 Session
 
-Use the Actions UI or GitHub CLI. Inputs and run metadata are public, so pass
-only an opaque target ID.
+可以使用 Actions UI 或 GitHub CLI。Inputs 和 run metadata 都是公开信息，
+因此只能传入不透明 target ID。
 
-Session without repository access:
+启动不包含仓库访问权限的 session：
 
 ```bash
 ORCHESTRATOR_REPO="<public-owner>/<public-repository>"
@@ -269,7 +254,7 @@ gh workflow run private-runner-session.yml \
   -f enable_ssh=true
 ```
 
-Session with isolated repository access:
+启动带隔离仓库访问权限的 session：
 
 ```bash
 OPAQUE_TARGET_ID="repo-01"
@@ -281,7 +266,7 @@ gh workflow run private-runner-session.yml \
   -f enable_ssh=true
 ```
 
-Find the new run without putting a private target name in output:
+查找新 run 时不要输出私有 target 名称：
 
 ```bash
 gh run list \
@@ -291,18 +276,18 @@ gh run list \
   --limit 5
 ```
 
-The node name is `gha-${RUN_ID}-${RUN_ATTEMPT}`. Run attempt is normally `1`
-for a new dispatch.
+节点名称是 `gha-${RUN_ID}-${RUN_ATTEMPT}`。新 dispatch 的 run attempt 通常为
+`1`。
 
-## Validate a new session
+## 验证新 Session
 
-Do not print full Tailscale status JSON or any environment variables in Actions
-logs. Perform the following checks from an authorized workstation.
+不要在 Actions 日志中输出完整 Tailscale status JSON 或任何环境变量。以下
+检查应从已授权工作站执行。
 
-### 1. Check workflow steps
+### 1. 检查 Workflow steps
 
-`Resolve target`, `Connect`, and, when selected, `Prepare repository access`
-must complete before `Execute` becomes active:
+`Resolve target`、`Connect`，以及选择 target 时的
+`Prepare repository access` 必须先完成，随后 `Execute` 才会进入 active：
 
 ```bash
 RUN_ID="<public-run-id>"
@@ -312,10 +297,10 @@ gh run view "$RUN_ID" \
   --json status,jobs
 ```
 
-An unsupported opaque ID must fail in the resolver before a credential-bearing
-Environment job starts.
+不支持的不透明 ID 必须在 resolver 中失败，并且失败发生在带凭证的
+Environment job 启动之前。
 
-### 2. Check peer identity and address family
+### 2. 检查 Peer 身份和地址族
 
 ```bash
 RUN_ATTEMPT="1"
@@ -326,19 +311,18 @@ tailscale status --json | jq --arg node "$NODE_NAME" '
   | {HostName, TailscaleIPs, Online, Relay}'
 ```
 
-Expected result:
+预期结果：
 
-- `Online` is true;
-- the affected workstation sees only the runner's tailnet IPv6 address;
+- `Online` 为 true；
+- 相关工作站只看到 runner 的 tailnet IPv6 地址。
 
-The workstation command cannot prove the node's tag or which preauth key
-registered it. Verify those separately on the private management host, and do
-not paste the resulting metadata into public logs:
+工作站上的命令无法证明节点 tag，也无法证明由哪个 preauth key 注册。应在私有
+管理主机上分别验证这些信息，并且不要把输出元数据粘贴到公开日志：
 
 ```bash
 HEADSCALE_ADMIN_HOST="<private-admin-host>"
-# Obtain this ID from the private record for the key currently deployed to the
-# GitHub Environments; Headscale's node list does not link a node to a key ID.
+# 从 GitHub Environments 当前部署 key 的私有记录中取得该 ID；
+# Headscale 节点列表不会把节点关联到 key ID。
 RUNNER_KEY_ID="<private-key-id>"
 
 ssh "$HEADSCALE_ADMIN_HOST" \
@@ -354,18 +338,16 @@ ssh "$HEADSCALE_ADMIN_HOST" \
     | {id, reusable, ephemeral, expiration, acl_tags}'
 ```
 
-The node must have `tag:gha-runner`. Independently, the key ID recorded for the
-current GitHub Environment deployment must be reusable, ephemeral, unexpired,
-and restricted to the runner tag. These checks do not prove a node-to-key
-causal link; they verify the two independently observable configuration
-boundaries. The filter deliberately omits the key value.
+节点必须带有 `tag:gha-runner`。独立地，私有部署记录中对应当前 GitHub
+Environment 的 key 必须是 reusable、ephemeral、尚未过期，并且只允许 runner
+tag。这些检查不能证明 node-to-key 因果关联；它们分别验证两个可以独立观察的
+配置边界。过滤器刻意省略 key 值。
 
-A DERP path is valid. GitHub-hosted runners frequently cannot establish a
-peer-to-peer path through both endpoints' NAT or VPN configuration. Record the
-relay region and latency privately if performance matters; do not treat the
-absence of a direct path as an SSH failure.
+DERP 是有效路径。由于两端 NAT 或 VPN 配置，GitHub-hosted runner 经常无法
+建立 peer-to-peer 路径。如果性能很重要，可以在私有记录中保存 relay region
+和延迟；不能因为没有直连就判定 SSH 失败。
 
-### 3. Check Tailscale SSH repeatedly
+### 3. 重复检查 Tailscale SSH
 
 ```bash
 for check in 1 2 3; do
@@ -374,111 +356,103 @@ for check in 1 2 3; do
 done
 ```
 
-All checks must succeed without enabling system MagicDNS, adding an SSH config
-alias, supplying a password, or passing an SSH public key.
+所有检查都必须成功，且不需要启用系统 MagicDNS、不需要 SSH config alias、
+不需要密码，也不需要传 SSH public key。
 
-### 4. Check repository credential isolation
+### 4. 检查仓库凭证隔离
 
-The `Prepare repository access` step confirms that both target secrets exist
-and configures a path-scoped Git credential store. For a full private check,
-run `git ls-remote` from the SSH session against the internally known target.
-Do not put the real repository name in Actions logs:
+`Prepare repository access` step 会确认两个 target secrets 均存在，并配置
+path-scoped Git credential store。要进行完整私有验证，应从 SSH session 内对
+私有资产清单中的目标运行 `git ls-remote`。不要将真实仓库名写入 Actions
+日志：
 
 ```bash
 tailscale ssh "runner@$NODE_NAME"
-# On the runner, using the repository name from private inventory:
+# 在 runner 上使用私有资产清单中的仓库名称：
 GIT_TERMINAL_PROMPT=0 git ls-remote --exit-code \
   "https://github.com/<private-owner>/<private-repository>.git" HEAD \
   >/dev/null
 ```
 
-The credential helper uses `useHttpPath=true`; a different repository path
-must not receive the selected token.
+Credential helper 使用 `useHttpPath=true`；不同仓库路径不能获得当前选择的
+token。
 
-## Keep or end a session
+## 保持或结束 Session
 
-The workflow deliberately waits in `Execute`. It remains online until it is
-cancelled or approaches GitHub's six-hour hosted-job limit. Setup time counts
-toward that limit.
+Workflow 会刻意停留在 `Execute`。它会持续在线，直到被取消或接近 GitHub
+六小时 hosted-job 限制。Setup 时间也计入该限制。
 
-Cancel deliberately when the session is no longer needed:
+Session 不再需要时应主动取消：
 
 ```bash
 gh run cancel "$RUN_ID" --repo "$ORCHESTRATOR_REPO"
 gh run watch "$RUN_ID" --repo "$ORCHESTRATOR_REPO"
 ```
 
-Expected shutdown behavior:
+预期关闭行为：
 
-1. the SSH session terminates;
-2. `Finalize` attempts `tailscale logout`;
-3. the GitHub-hosted machine and local credential file are destroyed;
-4. the old peer disappears from workstation status;
-5. Headscale removes the disconnected ephemeral node, immediately or after its
-   normal inactivity cleanup.
+1. SSH session 终止；
+2. `Finalize` 尝试执行 `tailscale logout`；
+3. GitHub-hosted 机器及其本地 credential 文件被销毁；
+4. 旧 peer 从工作站 status 中消失；
+5. Headscale 立即或通过正常 inactivity cleanup 删除断开的 ephemeral 节点。
 
-If cancellation prevents `Finalize`, do not reuse or rename the old node.
-Unique run-derived hostnames prevent collisions while ephemeral cleanup catches
-up.
+如果取消导致 `Finalize` 没有执行，不要复用或重命名旧节点。基于 run 的唯一
+hostname 可以在等待 ephemeral cleanup 时避免名称冲突。
 
-## Rotate credentials
+## 轮换凭证
 
-### Headscale runner key
+### Headscale Runner key
 
-1. Create a new tagged reusable ephemeral key with finite expiration.
-2. Replace `HEADSCALE_AUTHKEY` in every session Environment.
-3. Start a new no-target session and validate SSH.
-4. Start one target session and validate repository access.
-5. Expire or delete the old key only after both tests pass.
+1. 创建一个新的、带 tag、reusable、ephemeral 且具有有限有效期的 key。
+2. 替换所有 session Environment 中的 `HEADSCALE_AUTHKEY`。
+3. 启动新的 no-target session 并验证 SSH。
+4. 启动一个 target session 并验证仓库访问。
+5. 两项测试都通过后，才能 expire 或删除旧 key。
 
-List only non-secret metadata during review. If the CLI JSON includes the key
-itself, filter the output before displaying it.
+审查时只列出非敏感元数据。如果 CLI JSON 包含 key 本身，显示输出前必须过滤。
 
-### Target repository token
+### 目标仓库 token
 
-1. Create a replacement token limited to one repository.
-2. Replace `TARGET_REPO_AUTH` only in the matching Environment.
-3. Start that opaque target and validate `git ls-remote` over private SSH.
-4. Revoke the previous token.
+1. 创建一个只能访问单一仓库的替代 token。
+2. 只替换对应 Environment 中的 `TARGET_REPO_AUTH`。
+3. 启动对应不透明 target，并通过私有 SSH 验证 `git ls-remote`。
+4. 撤销旧 token。
 
-Never combine multiple target tokens into one JSON secret.
+绝不能把多个 target token 合并到一个 JSON secret 中。
 
-### Incident response
+### 事件响应
 
-If any secret appears in terminal capture, Actions output, an artifact, issue,
-pull request, or chat transcript, treat it as exposed even if the repository is
-private or the output was later deleted:
+如果任何 secret 出现在终端录屏、Actions 输出、artifact、issue、pull request
+或聊天记录中，即使仓库是 private 或输出后来被删除，也应视为已泄露：
 
-1. revoke or expire the credential;
-2. create and install a replacement;
-3. verify the old credential no longer works;
-4. inspect recent workflow runs and Headscale nodes for unexpected use;
-5. record the incident without copying the secret value.
+1. revoke 或 expire 该凭证；
+2. 创建并安装替代凭证；
+3. 确认旧凭证不再有效；
+4. 检查近期 workflow runs 和 Headscale nodes 是否存在异常使用；
+5. 记录事件，但不要复制 secret 值。
 
-## Personal-node migration
+## 个人节点迁移
 
-Create one Headscale user per person. Migrate a device with a short-lived,
-non-reusable personal preauth key. Verify the new owner and connectivity before
-deleting the old node.
+每个人创建独立 Headscale 用户。使用短期、不可复用的个人 preauth key 迁移
+设备。删除旧节点前必须验证新 owner 和网络连通性。
 
-Migrate ordinary clients before subnet routers. A re-registered subnet router
-may need its advertised routes approved again. Do not delete an offline node
-whose owner or function has not been confirmed; defer it until the device owner
-is available.
+先迁移普通客户端，最后迁移 subnet router。重新注册 subnet router 后，可能
+需要重新批准其 advertised routes。不要因为节点离线就删除 owner 或用途尚未
+确认的节点；应等设备 owner 可以配合时再处理。
 
-Delete used one-time keys after migration. Preserve unused keys only when their
-owner, purpose, and expiration remain valid.
+迁移后删除已使用的一次性 key。只有 owner、用途和 expiration 仍然有效时，
+才保留尚未使用的 key。
 
-## Clean Headscale operational state
+## 清理 Headscale 运维状态
 
-Perform cleanup only after the active configuration and current access path
-have passed validation. Never delete an offline node solely because it is
-offline.
+只有在 active 配置和当前访问路径都通过验证后才能清理。绝不能仅因为节点
+离线就删除它。
 
-### Inventory before deletion
+### 删除前盘点
 
-List nodes and preauth-key metadata on the private management host. Filter out
-the preauth key value before displaying or saving output:
+在私有管理主机上列出 nodes 和 preauth key 元数据。显示或保存输出前必须过滤
+preauth key 值：
 
 ```bash
 ssh "$HEADSCALE_ADMIN_HOST" \
@@ -491,13 +465,13 @@ ssh "$HEADSCALE_ADMIN_HOST" \
            used, expiration, acl_tags})'
 ```
 
-For every candidate node, confirm its owner, device, route-advertisement role,
-replacement node, and last-seen time. Defer uncertain nodes until their owner
-is available. Migrate and reapprove subnet routes before removing a router.
+对每个候选节点确认其 owner、设备、route advertisement 职责、替代节点和
+last-seen 时间。无法确认的节点应延后，直到 owner 可以配合。删除 router 前
+必须迁移并重新批准 subnet routes。
 
-### Remove a confirmed stale node or key
+### 删除已确认的旧节点或 key
 
-Confirm the installed CLI flags first:
+先确认当前安装版本的 CLI 参数：
 
 ```bash
 docker exec headscale headscale nodes delete --help
@@ -505,8 +479,8 @@ docker exec headscale headscale preauthkeys expire --help
 docker exec headscale headscale preauthkeys delete --help
 ```
 
-For Headscale versions supporting these flags, set the privately reviewed ID
-and perform one exact deletion at a time:
+对于支持以下参数的 Headscale 版本，设置已私下复核的 ID，每次只执行一个精确
+删除操作：
 
 ```bash
 STALE_NODE_ID="<confirmed-node-id>"
@@ -520,90 +494,87 @@ docker exec headscale headscale preauthkeys delete \
   --force --id "$USED_KEY_ID"
 ```
 
-Expiring first is useful when immediate revocation should precede deletion.
-Never delete the currently deployed reusable runner key until every Environment
-has been updated and replacement sessions have passed validation.
+需要立即撤销时，可以先 expire 再 delete。在所有 Environment 完成更新且替代
+session 通过验证前，绝不能删除当前部署的 reusable runner key。
 
-### Remove temporary policy files
+### 删除临时 Policy 文件
 
-1. Run `configtest` and `policy check` against the active policy.
-2. Confirm the active policy is the file referenced by the Headscale config.
-3. Compare each candidate or migration backup with the active file and verify
-   it is not mounted, referenced, or the only rollback copy.
-4. Delete each reviewed obsolete file by its exact path. Do not use a wildcard.
-5. Repeat `configtest`, policy validation, node connectivity, and runner SSH.
+1. 对 active policy 执行 `configtest` 和 `policy check`。
+2. 确认 active policy 就是 Headscale config 引用的文件。
+3. 将每个 candidate 或迁移备份与 active 文件比较，并确认它没有被 mount、
+   reference，也不是唯一 rollback 副本。
+4. 使用精确路径逐个删除已确认无用的文件，不要使用 wildcard。
+5. 再次执行 `configtest`、policy validation、节点连通性和 runner SSH。
 
-Keep one intentional, access-controlled rollback source when the active policy
-is not versioned elsewhere. Do not accumulate timestamped migration files in
-the live configuration directory.
+如果 active policy 没有在其他位置进行版本管理，应保留一个有访问控制且用途
+明确的 rollback 来源。不要在 live 配置目录中积累带时间戳的迁移文件。
 
-## Troubleshooting
+## 故障排查
 
-### The hostname does not resolve
+### Hostname 无法解析
 
-This is expected when the workstation declines Tailscale DNS. Use:
+工作站拒绝 Tailscale DNS 时，这是预期行为。使用：
 
 ```bash
 tailscale ssh "runner@$NODE_NAME"
 ```
 
-Do not enable system MagicDNS merely to make `/usr/bin/ssh` resolve the runner.
+不要仅为了让 `/usr/bin/ssh` 解析 runner 就启用系统 MagicDNS。
 
-### `/usr/bin/ssh` selects a stale address or bind address
+### `/usr/bin/ssh` 选择了旧地址或 bind address
 
-Inspect effective configuration:
+检查有效配置：
 
 ```bash
 /usr/bin/ssh -G "runner@$NODE_NAME" | \
   grep -E '^(hostname|user|addressfamily|bindaddress|proxycommand) '
 ```
 
-Remove stale runner mappings, `BindAddress`, and old `HostKeyAlias` entries.
-Use Tailscale SSH for the default mode.
+删除旧 runner mapping、`BindAddress` 和过时的 `HostKeyAlias`。默认模式应使用
+Tailscale SSH。
 
-### Tailscale starts but Quantumult X stops working
+### Tailscale 启动后 Quantumult X 无法工作
 
-Confirm:
+确认：
 
 ```bash
 tailscale debug prefs | jq \
   '{ControlURL, RouteAll, CorpDNS, WantRunning}'
 ```
 
-`RouteAll` and `CorpDNS` should be false on the coexistence workstation. Also
-confirm the private policy applies `disable-ipv4` to that exact device and the
-runner tag. Remove tailnet-specific Quantumult X DNS and direct-route rules.
+在共存工作站上，`RouteAll` 和 `CorpDNS` 应为 false。同时确认私有 policy 对
+该准确设备和 runner tag 应用了 `disable-ipv4`。删除 Quantumult X 中 tailnet
+专用的 DNS 和直连路由规则。
 
-### SSH works only through DERP
+### SSH 只能通过 DERP 工作
 
-DERP is a supported encrypted data path. Check repeated SSH success and latency
-before changing routing. Do not open public TCP 22 or add a public runner IP.
+DERP 是受支持的加密数据路径。修改路由前先检查重复 SSH 是否成功以及延迟。
+不要开放公网 TCP 22，也不要给 runner 添加公网 IP。
 
-### Workflow error codes
+### Workflow 错误码
 
-Use the error-code table in `README.md`. Public logs should contain only the
-stable code. Detailed diagnostics stay on the ephemeral runner under
-`$RUNNER_TEMP` and must not be uploaded.
+使用 `README.md` 中的错误码表。公开日志只能包含稳定错误码。详细诊断保留在
+临时 runner 的 `$RUNNER_TEMP` 下，不得上传。
 
-## Post-change acceptance checklist
+## 变更后验收清单
 
-After changing workflow code, Headscale policy, client routing, or credentials:
+修改 workflow 代码、Headscale policy、客户端路由或凭证后：
 
-- [ ] Headscale `configtest` passes.
-- [ ] Headscale policy validation passes.
-- [ ] The public workflow contains no private deployment values.
-- [ ] Repository and Environment secret names match the isolation model.
-- [ ] A new node has the unique run-derived name and runner tag.
-- [ ] The affected workstation sees the runner over tailnet IPv6 only.
-- [ ] Three spaced Tailscale SSH checks pass.
-- [ ] The selected target is accessible without printing its token.
-- [ ] A different target path cannot obtain that credential.
-- [ ] Cancelling the run executes best-effort finalization.
-- [ ] The old peer disappears and no stale SSH/DNS workaround remains.
-- [ ] Used one-time keys and obsolete temporary policy files are removed.
-- [ ] No secret or private identifier appears in the change or logs.
+- [ ] Headscale `configtest` 通过。
+- [ ] Headscale policy validation 通过。
+- [ ] 公开 workflow 不包含私有部署值。
+- [ ] Repository 和 Environment secret 名称符合隔离模型。
+- [ ] 新节点具有基于 run 的唯一名称和 runner tag。
+- [ ] 相关工作站只能通过 tailnet IPv6 看到 runner。
+- [ ] 三次间隔执行的 Tailscale SSH 检查都通过。
+- [ ] 可以访问选中的 target，且没有输出 token。
+- [ ] 不同 target path 无法获得该 credential。
+- [ ] 取消 run 时执行了 best-effort finalization。
+- [ ] 旧 peer 消失，并且没有残留 SSH/DNS workaround。
+- [ ] 已使用的一次性 key 和过时临时 policy 文件已删除。
+- [ ] 变更和日志中不存在 secret 或私有标识。
 
-Run the repository checks before committing workflow or documentation changes:
+提交 workflow 或文档变更前运行仓库检查：
 
 ```bash
 bash tests/session-lib.test.sh
@@ -611,7 +582,6 @@ bash tests/workflow-security.test.sh
 git diff --check
 ```
 
-When recording a validation result, store only the date, pass/fail outcome,
-public workflow URL if appropriate, generic failure code, and follow-up owner.
-Keep node addresses, real target names, member identities, and diagnostic output
-in private operational records.
+记录验证结果时，只保存日期、pass/fail 结果、适当情况下可公开的 workflow
+URL、通用 failure code 和 follow-up owner。节点地址、真实 target 名称、成员
+身份和诊断输出应保存在私有运维记录中。
