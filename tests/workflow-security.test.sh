@@ -187,7 +187,7 @@ grep -Fq 'direnv hook bash' "$DEVELOPMENT_SETUP" || \
   fail 'direnv is not enabled for SSH Bash sessions'
 grep -Fq 'uv-x86_64-unknown-linux-gnu.tar.gz' "$DEVELOPMENT_SETUP" || \
   fail 'uv binary URL is not versioned'
-grep -Fq 'printf '\''%s  %s\\n'\'' "$UV_SHA256"' "$DEVELOPMENT_SETUP" || \
+grep -Fq '"$UV_SHA256" "$uv_archive"' "$DEVELOPMENT_SETUP" || \
   fail 'uv binary checksum is not verified'
 grep -Fq 'jdx/mise/releases/download/${MISE_VERSION}/install.sh' "$DEVELOPMENT_SETUP" || \
   fail 'mise installer URL is not versioned'
