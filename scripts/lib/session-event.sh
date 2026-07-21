@@ -16,7 +16,12 @@ session_event_now_epoch() {
 session_event_iso8601() {
   local epoch="$1"
   [[ "$epoch" =~ ^[0-9]+$ ]] || return 1
-  date -u -d "@$epoch" '+%Y-%m-%dT%H:%M:%SZ'
+  python3 - "$epoch" <<'PY'
+from datetime import UTC, datetime
+import sys
+
+print(datetime.fromtimestamp(int(sys.argv[1]), UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
+PY
 }
 
 session_event_validate_event() {
@@ -45,7 +50,14 @@ session_event_read_private_line() {
   local path="$1"
   local value=''
   [[ -f "$path" && ! -L "$path" && -O "$path" ]] || return 1
-  [[ "$(stat -c '%a' "$path")" =~ ^(400|600)$ ]] || return 1
+  python3 - "$path" <<'PY' || return 1
+import os
+import stat
+import sys
+
+mode = stat.S_IMODE(os.stat(sys.argv[1]).st_mode)
+raise SystemExit(0 if mode in {0o400, 0o600} else 1)
+PY
   [[ "$(wc -l < "$path")" -eq 1 ]] || return 1
   IFS= read -r value < "$path" || return 1
   [[ -n "$value" && "$value" != *$'\r'* ]] || return 1

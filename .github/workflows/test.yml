@@ -11,60 +11,19 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
     steps:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
 
-      - name: Test session library
+      - name: Test happy-path workflow
         shell: bash
-        run: bash tests/session-lib.test.sh
-
-      - name: Test workflow security
-        shell: bash
-        run: bash tests/workflow-security.test.sh
-
-      - name: Test remote service security
-        shell: bash
-        run: bash tests/remote-services-security.test.sh
-
-      - name: Test DevSpace session
-        shell: bash
-        run: bash tests/devspace-session.test.sh
-
-      - name: Test T3 Code session
-        shell: bash
-        run: bash tests/t3code-session.test.sh
-
-      - name: Test Quick Tunnel
-        shell: bash
-        run: bash tests/quick-tunnel.test.sh
+        run: bash tests/happy-path-workflow.test.sh
 
       - name: Test Lark Webhook foundation
         shell: bash
         run: bash tests/lark-webhook.test.sh
-
-      - name: Test Lark lifecycle integration
-        shell: bash
-        run: bash tests/lark-lifecycle.test.sh
-
-      - name: Test Lark optional services
-        shell: bash
-        run: bash tests/lark-services.test.sh
-
-      - name: Test Lark Webhook MVP
-        shell: bash
-        run: bash tests/lark-mvp.test.sh
-
-      - name: Test development cache
-        shell: bash
-        run: bash tests/development-cache.test.sh
-
-      - name: Test startup optimization
-        shell: bash
-        run: bash tests/startup-optimization.test.sh
 
       - name: Check shell syntax
         shell: bash

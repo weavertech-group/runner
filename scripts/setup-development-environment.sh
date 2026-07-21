@@ -7,24 +7,17 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT_DIR/scripts/development-versions.env"
 
 runner_temp="${RUNNER_TEMP:?RUNNER_TEMP is required}"
-diagnostic_dir="$runner_temp/private-runner-diagnostics"
-log_file="$diagnostic_dir/development-environment.log"
 temporary_dir="$runner_temp/private-runner-development"
 local_bin="${HOME:?HOME is required}/.local/bin"
 mise_config="$HOME/.config/mise/config.toml"
 kubernetes_cache_dir="$HOME/.cache/private-runner/kubernetes"
 development_cache_hit="${DEVELOPMENT_CACHE_HIT:-false}"
 
-fail() {
-  printf 'E55\n' >&2
-  exit 55
-}
-
 install_uv() {
   local uv_archive="$temporary_dir/uv.tar.gz"
   local uv_dir="$temporary_dir/uv"
 
-  curl --fail --silent --show-error --location --retry 3 \
+  curl --fail --silent --show-error --location \
     --proto '=https' --tlsv1.2 \
     --output "$uv_archive" \
     "https://releases.astral.sh/github/uv/releases/download/${UV_VERSION}/uv-x86_64-unknown-linux-gnu.tar.gz"
@@ -37,7 +30,7 @@ install_uv() {
 }
 
 install_mise() {
-  curl --fail --silent --show-error --location --retry 3 \
+  curl --fail --silent --show-error --location \
     --proto '=https' --tlsv1.2 \
     --output "$temporary_dir/mise-installer.sh" \
     "https://github.com/jdx/mise/releases/download/${MISE_VERSION}/install.sh"
@@ -77,7 +70,7 @@ install_kubernetes_plugins() {
   install -d -m 0700 "$kubernetes_cache_dir"
 
   if [[ ! -f "$kubectx_archive" ]]; then
-    curl --fail --silent --show-error --location --retry 3 \
+    curl --fail --silent --show-error --location \
       --proto '=https' --tlsv1.2 \
       --output "$kubectx_archive" \
       "https://github.com/ahmetb/kubectx/archive/v${KUBECTX_VERSION}.tar.gz"
@@ -92,7 +85,7 @@ install_kubernetes_plugins() {
   sudo ln -sfn /usr/local/bin/kubens /usr/local/bin/kubectl-ns
 
   if [[ ! -f "$neat_archive" ]]; then
-    curl --fail --silent --show-error --location --retry 3 \
+    curl --fail --silent --show-error --location \
       --proto '=https' --tlsv1.2 \
       --output "$neat_archive" \
       "https://github.com/itaysk/kubectl-neat/releases/download/v${KUBECTL_NEAT_VERSION}/kubectl-neat_linux_amd64.tar.gz"
@@ -233,12 +226,5 @@ EOF
   configure_shell
 }
 
-install -d -m 0700 "$diagnostic_dir" "$temporary_dir" || fail
-: > "$log_file" || fail
-chmod 0600 "$log_file" || fail
-
-if ! main >> "$log_file" 2>&1; then
-  fail
-fi
-
-printf '%s\n' 'Development environment installed.'
+install -d -m 0700 "$temporary_dir"
+main

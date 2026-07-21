@@ -21,7 +21,7 @@ invariants.
 ## What is implemented
 
 - Unique node name: `gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}`.
-- Pinned Tailscale `1.94.2` Linux binary with an embedded SHA-256 check.
+- Tailscale installed by its official Linux installer.
 - Headscale URL override and Tailscale SSH without changing runner DNS.
 - Optional Ed25519 public-key mode using system OpenSSH on the tailnet only.
 - Public opaque-ID allowlist and one GitHub Environment per target repository.
@@ -30,13 +30,10 @@ invariants.
 - One shared target working tree for SSH, DevSpace, T3 Code, Codex, and Claude.
 - Optional pinned DevSpace `1.0.4`.
 - Optional pinned T3 Code `0.0.28`, bound to `127.0.0.1:3773`.
-- Pinned cloudflared `2026.7.2` Linux binary with an embedded SHA-256 check.
+- cloudflared `2026.7.2` for temporary Quick Tunnels.
 - One anonymous Quick Tunnel process and random HTTPS URL per enabled service.
-- Public HTTP readiness checks and a T3 WebSocket upgrade check.
 - Connection URLs and credentials stored only in mode-`0600` local files.
-- Minimal public output; detailed local diagnostics are never uploaded.
-- Best-effort service termination, state removal, logout, and ephemeral-node
-  cleanup when a job is cancelled.
+- Native command output in the Actions log; no custom error-code layer.
 
 ## Required administrator setup
 
@@ -229,65 +226,25 @@ The URLs change on every workflow run and stop working when that runner session
 ends. Old client entries must be updated with the newly generated URL or pairing
 link.
 
-Supplying `ssh_public_key` switches the session to system OpenSSH. Only
-`ssh-ed25519` and `sk-ssh-ed25519@openssh.com` single-line keys are accepted;
-password, keyboard-interactive, and root login remain disabled. Tailscale SSH is
-not enabled in this fallback mode because it owns tailnet TCP port 22 and would
-bypass `authorized_keys`. Find the current runner IPv6 address with
-`tailscale status`, then connect to that address with `ssh -6`.
+Supplying `ssh_public_key` writes the key to `authorized_keys` and starts the
+session without Tailscale SSH. Otherwise, use Tailscale SSH.
 
-The session step waits indefinitely and the job timeout is 360 minutes, so the
-runner stays online until GitHub enforces its six-hour hosted-job limit. Setup
-time is part of that limit. Ending or cancelling the workflow destroys the
-GitHub-hosted runner and its local connection files; when finalization runs, it
-also stops T3 Code, DevSpace, and all Quick Tunnel processes, removes temporary
-state, deletes Git credentials, and attempts an immediate Headscale logout.
+The session step waits indefinitely, so the runner stays online until GitHub
+enforces its hosted-job limit. Setup time is part of that limit. Ending or
+cancelling the workflow destroys the GitHub-hosted runner and its local
+connection files.
 
-## Error codes
+## Failure behavior
 
-Only stable error codes are printed publicly:
-
-| Code | Meaning | Where detected |
-| --- | --- | --- |
-| `E10` | unsupported or malformed opaque `target_id` | resolver |
-| `E11` | selected GitHub Environment unavailable | GitHub API preflight |
-| `E12` | selected `TARGET_REPO` or credential missing/invalid | runner |
-| `E20` | Tailscale download, checksum, or install failure | runner |
-| `E21` | invalid HTTPS URL, unhealthy control plane, or daemon startup failure | runner |
-| `E22` | registration rejected after a successful Headscale health check | runner |
-| `E24` | selected SSH server cannot be enabled | runner |
-| `E25` | Headscale grant or SSH policy denies the member | SSH client/policy logs |
-| `E30` | fallback SSH public key is invalid | runner |
-| `E40` | job reaches its configured timeout | GitHub Actions conclusion |
-| `E41` | run is cancelled | GitHub Actions conclusion |
-| `E50` | optional public service requested without a target or private SSH | runner |
-| `E51` | cloudflared download, Quick Tunnel startup, or URL discovery failure | runner |
-| `E52` | DevSpace installation, startup, or local readiness failure | runner |
-| `E53` | selected target repository clone failure | runner |
-| `E54` | public DevSpace MCP/OAuth endpoint readiness failure | runner |
-| `E61` | pinned T3 Code installation or verification failure | runner |
-| `E62` | T3 project initialization, startup, or local readiness failure | runner |
-| `E63` | public T3 HTTPS or WebSocket readiness failure | runner |
-
-`E25`, `E40`, and `E41` are platform/client outcomes and cannot reliably be
-emitted by a runner step: a denied client never executes code on the runner, and
-timeout/cancellation can terminate the machine before another step runs.
-
-Detailed command output stays under `$RUNNER_TEMP/private-runner-diagnostics` on
-the ephemeral machine. It is not printed, summarized, or uploaded. Connection
-material is stored separately under `~/private-runner-session` and deleted
-during finalization.
+The workflow deliberately follows the happy path. Commands fail with their
+native exit status and output; it does not translate failures into repository
+specific error codes, retry operations, diagnostic artifacts, or separate
+readiness checks.
 
 ## Local validation
 
 ```bash
-bash tests/session-lib.test.sh
-bash tests/workflow-security.test.sh
-bash tests/remote-services-security.test.sh
-bash tests/devspace-session.test.sh
-bash tests/t3code-session.test.sh
-bash tests/quick-tunnel.test.sh
-bash tests/development-cache.test.sh
-bash tests/startup-optimization.test.sh
-bash -n scripts/*.sh tests/*.sh
+bash tests/happy-path-workflow.test.sh
+bash tests/lark-webhook.test.sh
+bash -n scripts/*.sh scripts/lib/*.sh tests/*.sh
 ```

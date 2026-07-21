@@ -1,5 +1,9 @@
 # 安全审查记录：2026-07-20
 
+> 历史记录：本文审查的是 happy-path 简化前的实现，其中提到的脚本、错误码、
+> checksum、诊断和清理流程可能已被删除。当前操作方式以
+> [runner-operations-runbook.md](runner-operations-runbook.md) 为准。
+
 ## 审查范围
 
 本次审查覆盖：

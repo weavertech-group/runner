@@ -29,7 +29,6 @@ on:
 run-name: Private runner session
 
 permissions:
-  actions: read
   contents: read
 
 defaults:
@@ -43,61 +42,48 @@ jobs:
     outputs:
       environment_name: ${{ steps.resolve.outputs.environment_name }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
 
-      - name: Resolve target
-        id: resolve
+      - id: resolve
         env:
           TARGET_ID: ${{ inputs.target_id }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -euo pipefail
-          environment_name="$(bash scripts/session-lib.sh resolve-target \
-            "$TARGET_ID" .github/target-repositories.txt)"
-          bash scripts/verify-environment.sh "$environment_name"
+          if [[ -z "$TARGET_ID" ]]; then
+            environment_name=session--none
+          else
+            environment_name="$(awk -v id="$TARGET_ID" '$1 == id { print $2 }' .github/target-repositories.txt)"
+            [[ -n "$environment_name" ]]
+          fi
           printf 'environment_name=%s\n' "$environment_name" >> "$GITHUB_OUTPUT"
 
   runner:
     name: Session
     needs: resolve-target
     runs-on: ubuntu-24.04
-    timeout-minutes: 360
     environment:
       name: ${{ needs.resolve-target.outputs.environment_name }}
       deployment: false
     steps:
-      - name: Checkout
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
 
-      - name: Validate request
-        if: ${{ (inputs.enable_devspace || inputs.enable_t3code) && (inputs.target_id == '' || ! inputs.enable_ssh) }}
-        run: |
-          printf '%s\n' 'Optional services require a target_id and enable_ssh=true.' >&2
-          exit 1
-
-      - name: Prepare Node runtime
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22.23.1
 
-      - name: Prepare cache keys
-        id: cache-keys
-        run: |
-          set -euo pipefail
-          # shellcheck source=scripts/development-versions.env
-          source scripts/development-versions.env
-          printf 'npm=%s\n' \
-            "npm-v1-${RUNNER_OS}-${RUNNER_ARCH}-node-${NODE_VERSION}-$(date -u +%G-W%V)" \
-            >> "$GITHUB_OUTPUT"
+      - name: Report session starting
+        env:
+          LARK_REPORTING_ENABLED: ${{ vars.LARK_REPORTING_ENABLED }}
+          LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
+          LARK_WEBHOOK_SECRET: ${{ secrets.LARK_WEBHOOK_SECRET }}
+          SESSION_TARGET_ID: ${{ inputs.target_id }}
+        run: bash scripts/report-session-event.sh starting
 
       - name: Restore development environment cache
         id: development-cache
-        continue-on-error: true
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -111,42 +97,31 @@ jobs:
             ~/.local/bin/mise
           key: development-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/development-versions.env') }}
 
-      - name: Restore npm download cache
-        id: npm-cache
-        continue-on-error: true
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.npm
-            ~/.cache/node/corepack
-          key: ${{ steps.cache-keys.outputs.npm }}
-
-      - name: Report session starting
-        continue-on-error: true
-        env:
-          LARK_REPORTING_ENABLED: ${{ vars.LARK_REPORTING_ENABLED }}
-          LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
-          LARK_WEBHOOK_SECRET: ${{ secrets.LARK_WEBHOOK_SECRET }}
-          SESSION_TARGET_ID: ${{ inputs.target_id }}
-          SESSION_SSH_ONLINE: false
-        run: bash scripts/report-session-event.sh starting
-
-      - name: Prepare network
-        if: ${{ inputs.enable_ssh }}
-        run: bash scripts/install-tailscale.sh
-
-      - name: Connect
-        id: connect
+      - name: Join Headscale
         if: ${{ inputs.enable_ssh }}
         env:
           HEADSCALE_URL: ${{ secrets.HEADSCALE_URL }}
           HEADSCALE_AUTHKEY: ${{ secrets.HEADSCALE_AUTHKEY }}
           SSH_PUBLIC_KEY: ${{ inputs.ssh_public_key }}
-        run: bash scripts/connect-headscale.sh
+        run: |
+          curl -fsSL https://tailscale.com/install.sh | sh
+          if [[ -n "$SSH_PUBLIC_KEY" ]]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq openssh-server
+            sudo systemctl enable --now ssh
+            install -d -m 0700 "$HOME/.ssh"
+            printf '%s\n' "$SSH_PUBLIC_KEY" >> "$HOME/.ssh/authorized_keys"
+            chmod 600 "$HOME/.ssh/authorized_keys"
+            sudo tailscale up --login-server="$HEADSCALE_URL" --auth-key="$HEADSCALE_AUTHKEY" --hostname="gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" --accept-dns=false
+            tailnet_ipv6="$(sudo tailscale status --json | jq -r '[.Self.TailscaleIPs[] | select(contains(":"))][0]')"
+            printf 'AddressFamily inet6\nListenAddress %s\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin no\nAllowUsers runner\n' "$tailnet_ipv6" | sudo tee /etc/ssh/sshd_config.d/99-private-runner.conf >/dev/null
+            sudo systemctl restart ssh
+          else
+            sudo tailscale up --login-server="$HEADSCALE_URL" --auth-key="$HEADSCALE_AUTHKEY" --hostname="gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" --accept-dns=false --ssh
+          fi
 
       - name: Report SSH online
-        if: ${{ inputs.enable_ssh && steps.connect.outcome == 'success' }}
-        continue-on-error: true
+        if: ${{ inputs.enable_ssh }}
         env:
           LARK_REPORTING_ENABLED: ${{ vars.LARK_REPORTING_ENABLED }}
           LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
@@ -156,37 +131,34 @@ jobs:
           SESSION_RUNNER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}
         run: bash scripts/report-session-event.sh ssh-online
 
-      - name: Prepare repository access
+      - name: Configure target repository access
         if: ${{ inputs.target_id != '' }}
         env:
           TARGET_REPO: ${{ secrets.TARGET_REPO }}
           TARGET_REPO_AUTH: ${{ secrets.TARGET_REPO_AUTH }}
-        run: bash scripts/configure-repository-credential.sh
-
-      - name: Mark development environment installing
         run: |
-          set -euo pipefail
-          install -d -m 0700 "$HOME/private-runner-session"
-          printf 'installing\n' > "$HOME/private-runner-session/setup-status"
-          chmod 0600 "$HOME/private-runner-session/setup-status"
+          git config --global credential.https://github.com.useHttpPath true
+          git config --global credential.helper "store --file=$RUNNER_TEMP/target-repo-credential"
+          printf 'protocol=https\nhost=github.com\npath=%s.git\nusername=x-access-token\npassword=%s\n\n' "$TARGET_REPO" "$TARGET_REPO_AUTH" | git credential approve
 
       - name: Install development environment
-        id: development-install
-        continue-on-error: true
         env:
           DEVELOPMENT_CACHE_HIT: ${{ steps.development-cache.outputs.cache-hit }}
-        run: bash scripts/setup-development-environment.sh
+        run: |
+          bash scripts/setup-development-environment.sh
+          npm install --global --no-audit --no-fund @openai/codex@latest @anthropic-ai/claude-code@latest
 
-      - name: Verify fixed development environment
-        id: fixed-verify
-        continue-on-error: true
+      - name: Report development environment ready
         env:
-          VERIFY_AI_TOOLS: false
-        run: bash scripts/verify-development-environment.sh
+          LARK_REPORTING_ENABLED: ${{ vars.LARK_REPORTING_ENABLED }}
+          LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
+          LARK_WEBHOOK_SECRET: ${{ secrets.LARK_WEBHOOK_SECRET }}
+          SESSION_TARGET_ID: ${{ inputs.target_id }}
+          SESSION_SSH_ONLINE: ${{ inputs.enable_ssh }}
+        run: bash scripts/report-session-event.sh setup-ready
 
       - name: Save development environment cache
-        if: ${{ steps.development-cache.outputs.cache-hit != 'true' && steps.development-install.outcome == 'success' && steps.fixed-verify.outcome == 'success' }}
-        continue-on-error: true
+        if: ${{ steps.development-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
@@ -200,178 +172,67 @@ jobs:
             ~/.local/bin/mise
           key: development-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/development-versions.env') }}
 
-      - name: Install AI coding CLIs
-        id: ai-tools
-        continue-on-error: true
-        run: |
-          npm install --global --no-audit --no-fund \
-            @openai/codex@latest \
-            @anthropic-ai/claude-code@latest
-
-      - name: Verify complete development environment
-        id: complete-verify
-        continue-on-error: true
-        run: bash scripts/verify-development-environment.sh
-
-      - name: Save npm download cache
-        if: ${{ steps.npm-cache.outputs.cache-hit != 'true' && steps.development-install.outcome == 'success' && steps.ai-tools.outcome == 'success' }}
-        continue-on-error: true
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.npm
-            ~/.cache/node/corepack
-          key: ${{ steps.cache-keys.outputs.npm }}
-
-      - name: Publish development environment status
-        if: ${{ always() }}
-        env:
-          DEVELOPMENT_INSTALL: ${{ steps.development-install.outcome }}
-          FIXED_VERIFY: ${{ steps.fixed-verify.outcome }}
-          AI_TOOLS: ${{ steps.ai-tools.outcome }}
-          COMPLETE_VERIFY: ${{ steps.complete-verify.outcome }}
-        run: |
-          set -euo pipefail
-          install -d -m 0700 "$HOME/private-runner-session"
-          status=degraded
-          if [[ "$DEVELOPMENT_INSTALL" == success && \
-                "$FIXED_VERIFY" == success && \
-                "$AI_TOOLS" == success && \
-                "$COMPLETE_VERIFY" == success ]]; then
-            status=ready
-          fi
-          printf '%s\n' "$status" > "$HOME/private-runner-session/setup-status"
-          printf '%s\n' \
-            "development_install=$DEVELOPMENT_INSTALL" \
-            "fixed_verify=$FIXED_VERIFY" \
-            "ai_tools=$AI_TOOLS" \
-            "complete_verify=$COMPLETE_VERIFY" \
-            > "$HOME/private-runner-session/setup-details"
-          chmod 0600 \
-            "$HOME/private-runner-session/setup-status" \
-            "$HOME/private-runner-session/setup-details"
-
-      - name: Report development environment status
-        if: ${{ always() }}
-        continue-on-error: true
-        env:
-          LARK_REPORTING_ENABLED: ${{ vars.LARK_REPORTING_ENABLED }}
-          LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
-          LARK_WEBHOOK_SECRET: ${{ secrets.LARK_WEBHOOK_SECRET }}
-          SESSION_TARGET_ID: ${{ inputs.target_id }}
-          SESSION_SSH_ONLINE: ${{ inputs.enable_ssh && steps.connect.outcome == 'success' }}
-          SESSION_ERROR_CODE: setup-degraded
-        run: |
-          case "$(cat "$HOME/private-runner-session/setup-status" 2>/dev/null || true)" in
-            ready) bash scripts/report-session-event.sh setup-ready ;;
-            degraded) bash scripts/report-session-event.sh setup-degraded ;;
-          esac
-
-      - name: Validate optional service prerequisites
-        if: ${{ inputs.enable_devspace || inputs.enable_t3code }}
+      - name: Install optional tools
+        if: ${{ (inputs.enable_devspace || inputs.enable_t3code) && inputs.enable_ssh && inputs.target_id != '' }}
         env:
           ENABLE_DEVSPACE: ${{ inputs.enable_devspace }}
           ENABLE_T3CODE: ${{ inputs.enable_t3code }}
-          FIXED_VERIFY: ${{ steps.fixed-verify.outcome }}
-          COMPLETE_VERIFY: ${{ steps.complete-verify.outcome }}
         run: |
-          set -euo pipefail
-          if [[ "$ENABLE_DEVSPACE" == true && "$FIXED_VERIFY" != success ]]; then
-            printf '%s\n' 'DevSpace was not started because fixed development environment verification failed.' >&2
-            exit 1
-          fi
-          if [[ "$ENABLE_T3CODE" == true && "$COMPLETE_VERIFY" != success ]]; then
-            printf '%s\n' 'T3 Code was not started because complete development environment verification failed.' >&2
-            exit 1
-          fi
+          install -d "$RUNNER_TEMP/private-runner-tools"
+          curl -fsSL -o "$RUNNER_TEMP/private-runner-tools/cloudflared" https://github.com/cloudflare/cloudflared/releases/download/2026.7.2/cloudflared-linux-amd64
+          chmod +x "$RUNNER_TEMP/private-runner-tools/cloudflared"
+          if [[ "$ENABLE_DEVSPACE" == true ]]; then npm install --global --no-audit --no-fund @waishnav/devspace@1.0.4; fi
+          if [[ "$ENABLE_T3CODE" == true ]]; then npm install --global --no-audit --no-fund t3@0.0.28; fi
 
-      - name: Install optional service tools
-        if: ${{ inputs.enable_devspace || inputs.enable_t3code }}
-        env:
-          ENABLE_T3CODE: ${{ inputs.enable_t3code }}
-        run: |
-          bash scripts/install-cloudflared.sh
-          if [[ "$ENABLE_T3CODE" == true ]]; then
-            bash scripts/install-t3code.sh
-          fi
-
-      - name: Prepare target workspace
-        if: ${{ inputs.enable_devspace || inputs.enable_t3code }}
+      - name: Clone target repository
+        if: ${{ (inputs.enable_devspace || inputs.enable_t3code) && inputs.enable_ssh && inputs.target_id != '' }}
         env:
           TARGET_REPO: ${{ secrets.TARGET_REPO }}
-        run: bash scripts/prepare-target-workspace.sh
+        run: git clone "https://github.com/${TARGET_REPO}.git" "$RUNNER_TEMP/target-workspace"
 
-      - name: Start Cloudflare Quick Tunnels
-        if: ${{ inputs.enable_devspace || inputs.enable_t3code }}
+      - name: Start Quick Tunnels
+        if: ${{ (inputs.enable_devspace || inputs.enable_t3code) && inputs.enable_ssh && inputs.target_id != '' }}
         env:
           ENABLE_DEVSPACE: ${{ inputs.enable_devspace }}
           ENABLE_T3CODE: ${{ inputs.enable_t3code }}
-        run: bash scripts/start-quick-tunnels.sh
+        run: |
+          cloudflared="$RUNNER_TEMP/private-runner-tools/cloudflared"
+          if [[ "$ENABLE_DEVSPACE" == true ]]; then
+            "$cloudflared" tunnel --url http://127.0.0.1:7676 > "$RUNNER_TEMP/devspace-tunnel.log" 2>&1 &
+          fi
+          if [[ "$ENABLE_T3CODE" == true ]]; then
+            "$cloudflared" tunnel --url http://127.0.0.1:3773 > "$RUNNER_TEMP/t3code-tunnel.log" 2>&1 &
+          fi
+          sleep 5
+          if [[ "$ENABLE_DEVSPACE" == true ]]; then echo "DEVSPACE_PUBLIC_URL=$(grep -oE 'https://[-a-z0-9]+[.]trycloudflare[.]com' "$RUNNER_TEMP/devspace-tunnel.log" | head -n1)" >> "$GITHUB_ENV"; fi
+          if [[ "$ENABLE_T3CODE" == true ]]; then echo "T3CODE_PUBLIC_URL=$(grep -oE 'https://[-a-z0-9]+[.]trycloudflare[.]com' "$RUNNER_TEMP/t3code-tunnel.log" | head -n1)" >> "$GITHUB_ENV"; fi
 
       - name: Start DevSpace
-        if: ${{ inputs.enable_devspace }}
-        run: bash scripts/start-devspace.sh
+        if: ${{ inputs.enable_devspace && inputs.enable_ssh && inputs.target_id != '' }}
+        run: |
+          owner_token="$(openssl rand -hex 32)"
+          connection_dir="$HOME/private-runner-session/devspace"
+          install -d -m 0700 "$connection_dir"
+          HOST=127.0.0.1 PORT=7676 DEVSPACE_CONFIG_DIR="$RUNNER_TEMP/devspace-config" DEVSPACE_ALLOWED_ROOTS="$RUNNER_TEMP/target-workspace" DEVSPACE_PUBLIC_BASE_URL="$DEVSPACE_PUBLIC_URL" DEVSPACE_OAUTH_OWNER_TOKEN="$owner_token" DEVSPACE_STATE_DIR="$RUNNER_TEMP/devspace-state" DEVSPACE_WORKTREE_ROOT="$RUNNER_TEMP/devspace-worktrees" DEVSPACE_TOOL_MODE=full DEVSPACE_WIDGETS=changes DEVSPACE_SUBAGENTS=0 DEVSPACE_LOG_SHELL_COMMANDS=0 devspace serve > "$RUNNER_TEMP/devspace.log" 2>&1 &
+          printf '%s\n' "$DEVSPACE_PUBLIC_URL/mcp" > "$connection_dir/mcp-url"
+          printf '%s\n' "$owner_token" > "$connection_dir/owner-token"
+          printf 'MCP_URL=%s/mcp\nOWNER_TOKEN=%s\n' "$DEVSPACE_PUBLIC_URL" "$owner_token" > "$connection_dir/connection.txt"
+          chmod 600 "$connection_dir/mcp-url" "$connection_dir/owner-token" "$connection_dir/connection.txt"
 
       - name: Start T3 Code
-        if: ${{ inputs.enable_t3code }}
-        run: bash scripts/start-t3code.sh
-
-      - name: Verify public DevSpace
-        id: verify-devspace-public
-        if: ${{ inputs.enable_devspace }}
-        continue-on-error: true
-        env:
-          ENABLE_DEVSPACE: true
-          ENABLE_T3CODE: false
-        run: bash scripts/verify-public-services.sh
-
-      - name: Verify public T3 Code
-        id: verify-t3code-public
-        if: ${{ inputs.enable_t3code }}
-        continue-on-error: true
-        env:
-          ENABLE_DEVSPACE: false
-          ENABLE_T3CODE: true
-        run: bash scripts/verify-public-services.sh
-
-      - name: Report optional services online
-        if: ${{ always() && (inputs.enable_devspace || inputs.enable_t3code) }}
-        continue-on-error: true
-        env:
-          LARK_REPORTING_ENABLED: ${{ vars.LARK_REPORTING_ENABLED }}
-          LARK_WEBHOOK_INCLUDE_TEMPORARY_ACCESS: ${{ vars.LARK_WEBHOOK_INCLUDE_TEMPORARY_ACCESS }}
-          LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
-          LARK_WEBHOOK_SECRET: ${{ secrets.LARK_WEBHOOK_SECRET }}
-          SESSION_TARGET_ID: ${{ inputs.target_id }}
-          SESSION_SSH_ONLINE: ${{ inputs.enable_ssh && steps.connect.outcome == 'success' }}
-          ENABLE_DEVSPACE: ${{ inputs.enable_devspace }}
-          ENABLE_T3CODE: ${{ inputs.enable_t3code }}
-          DEVSPACE_PUBLIC_VERIFY: ${{ steps.verify-devspace-public.outcome }}
-          T3CODE_PUBLIC_VERIFY: ${{ steps.verify-t3code-public.outcome }}
+        if: ${{ inputs.enable_t3code && inputs.enable_ssh && inputs.target_id != '' }}
         run: |
-          if [[ "$ENABLE_DEVSPACE" == true && "$DEVSPACE_PUBLIC_VERIFY" == success ]]; then
-            SESSION_SERVICE=devspace bash scripts/report-session-event.sh service-online
-          fi
-          if [[ "$ENABLE_T3CODE" == true && "$T3CODE_PUBLIC_VERIFY" == success ]]; then
-            SESSION_SERVICE=t3code bash scripts/report-session-event.sh service-online
-          fi
-
-      - name: Validate public optional services
-        if: ${{ always() && (steps.verify-devspace-public.outcome != 'skipped' || steps.verify-t3code-public.outcome != 'skipped') }}
-        env:
-          ENABLE_DEVSPACE: ${{ inputs.enable_devspace }}
-          ENABLE_T3CODE: ${{ inputs.enable_t3code }}
-          DEVSPACE_PUBLIC_VERIFY: ${{ steps.verify-devspace-public.outcome }}
-          T3CODE_PUBLIC_VERIFY: ${{ steps.verify-t3code-public.outcome }}
-        run: |
-          if [[ "$ENABLE_DEVSPACE" == true && "$DEVSPACE_PUBLIC_VERIFY" != success ]]; then
-            printf '%s\n' 'Public DevSpace verification failed.' >&2
-            exit 1
-          fi
-          if [[ "$ENABLE_T3CODE" == true && "$T3CODE_PUBLIC_VERIFY" != success ]]; then
-            printf '%s\n' 'Public T3 Code verification failed.' >&2
-            exit 1
-          fi
+          t3_home="$RUNNER_TEMP/t3code-home"
+          connection_dir="$HOME/private-runner-session/t3code"
+          install -d -m 0700 "$t3_home" "$connection_dir"
+          t3 project add --base-dir "$t3_home" "$RUNNER_TEMP/target-workspace"
+          T3CODE_HOME="$t3_home" t3 serve --base-dir "$t3_home" --host 127.0.0.1 --port 3773 "$RUNNER_TEMP/target-workspace" > "$RUNNER_TEMP/t3code.log" 2>&1 &
+          sleep 3
+          pairing_token="$(sed -n 's/^Token: //p' "$RUNNER_TEMP/t3code.log" | head -n1)"
+          printf '%s\n' "$T3CODE_PUBLIC_URL" > "$connection_dir/t3-url"
+          printf '%s/pair#token=%s\n' "$T3CODE_PUBLIC_URL" "$pairing_token" > "$connection_dir/pairing-url"
+          printf 'T3_URL=%s\nPAIRING_URL=%s/pair#token=%s\n' "$T3CODE_PUBLIC_URL" "$T3CODE_PUBLIC_URL" "$pairing_token" > "$connection_dir/connection.txt"
+          chmod 600 "$connection_dir/t3-url" "$connection_dir/pairing-url" "$connection_dir/connection.txt"
 
       - name: Keep session alive
         if: ${{ inputs.enable_ssh && ! inputs.non_durable }}
@@ -379,15 +240,9 @@ jobs:
 
       - name: Report session offline
         if: ${{ always() }}
-        continue-on-error: true
         env:
           LARK_REPORTING_ENABLED: ${{ vars.LARK_REPORTING_ENABLED }}
           LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
           LARK_WEBHOOK_SECRET: ${{ secrets.LARK_WEBHOOK_SECRET }}
           SESSION_TARGET_ID: ${{ inputs.target_id }}
-          SESSION_SSH_ONLINE: false
         run: bash scripts/report-session-event.sh offline
-
-      - name: Finalize
-        if: ${{ always() }}
-        run: bash scripts/cleanup.sh

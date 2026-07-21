@@ -1,18 +1,5 @@
 #!/usr/bin/env bash
 
-lark_webhook_diagnostic() {
-  local category="$1"
-  local runner_temp="${RUNNER_TEMP:-/tmp}"
-  local directory="$runner_temp/private-runner-diagnostics"
-  local path="$directory/lark-webhook.log"
-
-  install -d -m 0700 "$directory" 2>/dev/null || return 0
-  umask 077
-  printf '%s event=%s service=%s\n' \
-    "$category" "${SE_EVENT-unknown}" "${SE_SERVICE-none}" >> "$path" 2>/dev/null || return 0
-  chmod 0600 "$path" 2>/dev/null || true
-}
-
 lark_webhook_enabled() {
   [[ "${LARK_REPORTING_ENABLED-false}" == true ]]
 }
@@ -167,59 +154,25 @@ lark_webhook_send_event() {
   local response_file=''
 
   lark_webhook_enabled || return 0
-  if ! lark_webhook_validate_config; then
-    lark_webhook_diagnostic configuration-error
-    return 1
-  fi
+  lark_webhook_validate_config
 
   timestamp="${SESSION_EVENT_NOW_EPOCH-$(date -u +%s)}"
-  [[ "$timestamp" =~ ^[0-9]{10}$ ]] || {
-    lark_webhook_diagnostic timestamp-error
-    return 1
-  }
-  signature="$(lark_webhook_signature "$timestamp")" || {
-    lark_webhook_diagnostic signature-error
-    return 1
-  }
-  message="$(lark_webhook_message)" || {
-    lark_webhook_diagnostic message-error
-    return 1
-  }
-  payload="$(lark_webhook_payload "$timestamp" "$signature" "$message")" || {
-    lark_webhook_diagnostic payload-error
-    return 1
-  }
-
-  response_file="$(mktemp "${RUNNER_TEMP:-/tmp}/lark-webhook-response.XXXXXX")" || {
-    lark_webhook_diagnostic response-file-error
-    return 1
-  }
+  [[ "$timestamp" =~ ^[0-9]{10}$ ]]
+  signature="$(lark_webhook_signature "$timestamp")"
+  message="$(lark_webhook_message)"
+  payload="$(lark_webhook_payload "$timestamp" "$signature" "$message")"
+  response_file="$(mktemp "${RUNNER_TEMP:-/tmp}/lark-webhook-response.XXXXXX")"
   chmod 0600 "$response_file"
 
-  if ! printf '%s' "$payload" | curl \
-      --fail-with-body \
-      --silent \
-      --show-error \
-      --connect-timeout 5 \
-      --max-time 15 \
-      --retry 2 \
-      --retry-delay 1 \
-      --retry-all-errors \
-      --header 'Content-Type: application/json' \
-      --data-binary @- \
-      "$LARK_WEBHOOK_URL" \
-      > "$response_file" 2>/dev/null; then
-    rm -f "$response_file"
-    lark_webhook_diagnostic transport-error
-    return 1
-  fi
-
-  if ! lark_webhook_response_ok "$response_file"; then
-    rm -f "$response_file"
-    lark_webhook_diagnostic api-error
-    return 1
-  fi
+  printf '%s' "$payload" | curl \
+    --fail-with-body \
+    --silent \
+    --show-error \
+    --header 'Content-Type: application/json' \
+    --data-binary @- \
+    "$LARK_WEBHOOK_URL" \
+    > "$response_file"
+  lark_webhook_response_ok "$response_file"
 
   rm -f "$response_file"
-  return 0
 }
