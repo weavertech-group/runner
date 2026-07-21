@@ -66,9 +66,13 @@ status_line="$(grep -n -- '- name: Publish development environment status' "$WOR
 [[ "$status_line" -lt "$execute_line" ]] || \
   fail 'setup status is not published before the long-running session'
 
-start_service_block="$(sed -n '/- name: Start optional service/,/- name: Execute/p' "$WORKFLOW")"
-grep -Fq "steps.fixed-verify.outcome == 'success'" <<< "$start_service_block" || \
+service_prerequisite_block="$(sed -n '/- name: Validate optional service prerequisites/,/- name: Install optional service tools/p' "$WORKFLOW")"
+grep -Fq '"$ENABLE_DEVSPACE" == true && "$FIXED_VERIFY" != success' \
+  <<< "$service_prerequisite_block" || \
   fail 'DevSpace is not guarded by a usable fixed development environment'
+grep -Fq '"$ENABLE_T3CODE" == true && "$COMPLETE_VERIFY" != success' \
+  <<< "$service_prerequisite_block" || \
+  fail 'T3 Code is not guarded by a complete coding-agent environment'
 
 [[ "$(grep -Fc 'workflow_dispatch:' "$PREPARE_WORKFLOW")" -eq 1 ]] || \
   fail 'cache preparation workflow must be manually dispatchable'
