@@ -1,0 +1,32 @@
+name: Repo 01 T3 Code Session
+
+on:
+  workflow_dispatch:
+
+run-name: Repo 01 T3 Code session
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    name: Dispatch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Dispatch private runner session
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh workflow run private-runner-session.yml \
+            --repo "$REPOSITORY" \
+            --ref main \
+            --raw-field target_id=repo-01 \
+            --raw-field enable_ssh=true \
+            --raw-field enable_devspace=false \
+            --raw-field enable_t3code=true
+          printf '%s\n' 'Dispatched repo-01 with SSH and T3 Code enabled.'

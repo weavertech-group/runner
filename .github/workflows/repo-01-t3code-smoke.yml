@@ -1,0 +1,129 @@
+name: Repo 01 T3 Code Smoke
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/repo-01-t3code-smoke.pending
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: repo-01-t3code-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: Dispatch, verify, and cancel
+    if: ${{ github.repository == 'weavertech-group/runner' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Verify one-time marker
+        shell: bash
+        run: test -f .github/repo-01-t3code-smoke.pending
+
+      - name: Dispatch repo-01 T3 Code session
+        id: dispatch
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          started_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          gh workflow run private-runner-session.yml \
+            --repo "$REPOSITORY" \
+            --ref main \
+            --raw-field target_id=repo-01 \
+            --raw-field enable_ssh=true \
+            --raw-field enable_devspace=false \
+            --raw-field enable_t3code=true
+
+          run_id=''
+          for _ in $(seq 1 30); do
+            runs_json="$(gh api \
+              "repos/$REPOSITORY/actions/workflows/private-runner-session.yml/runs?event=workflow_dispatch&branch=main&per_page=20")"
+            run_id="$(jq -r --arg started "$started_at" \
+              '[.workflow_runs[] | select(.created_at >= $started)] | sort_by(.created_at) | last | .id // empty' \
+              <<< "$runs_json")"
+            [[ -n "$run_id" ]] && break
+            sleep 2
+          done
+          [[ "$run_id" =~ ^[0-9]+$ ]]
+          printf 'run_id=%s\n' "$run_id" >> "$GITHUB_OUTPUT"
+          printf 'run_url=https://github.com/%s/actions/runs/%s\n' "$REPOSITORY" "$run_id" >> "$GITHUB_OUTPUT"
+          printf 'Dispatched downstream run %s.\n' "$run_id"
+
+      - name: Wait for T3 Code and Lark reporting
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ steps.dispatch.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 180); do
+            jobs_json="$(gh api "repos/$REPOSITORY/actions/runs/$RUN_ID/jobs?filter=latest&per_page=100")"
+            state="$(jq -r '
+              (.jobs | map(select(.name == "Session")) | first // null) as $session
+              | if $session == null then "pending"
+                else (($session.steps // []) | map({key: .name, value: .conclusion}) | from_entries) as $steps
+                | if $steps["Verify public T3 Code"] == "success"
+                     and $steps["Report optional services online"] == "success"
+                  then "ready"
+                  elif $session.status == "completed" then "failed"
+                  else "pending"
+                  end
+                end
+            ' <<< "$jobs_json")"
+            case "$state" in
+              ready)
+                printf 'T3 Code and the Lark reporting step are ready.\n'
+                exit 0
+                ;;
+              failed)
+                printf 'Downstream session completed before T3 Code became ready.\n' >&2
+                exit 1
+                ;;
+            esac
+            sleep 10
+          done
+          printf 'Timed out waiting for T3 Code readiness.\n' >&2
+          exit 1
+
+      - name: Cancel and verify cleanup
+        if: ${{ always() && steps.dispatch.outputs.run_id != '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ steps.dispatch.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          gh run cancel "$RUN_ID" --repo "$REPOSITORY" || true
+
+          for _ in $(seq 1 60); do
+            status="$(gh api "repos/$REPOSITORY/actions/runs/$RUN_ID" --jq '.status')"
+            [[ "$status" == completed ]] && break
+            sleep 5
+          done
+
+          jobs_json="$(gh api "repos/$REPOSITORY/actions/runs/$RUN_ID/jobs?filter=latest&per_page=100")"
+          cleanup_state="$(jq -r '
+            (.jobs | map(select(.name == "Session")) | first // null) as $session
+            | if $session == null then "missing"
+              else (($session.steps // []) | map({key: .name, value: .conclusion}) | from_entries) as $steps
+              | ($steps["Finalize"] // "not-run")
+              end
+          ' <<< "$jobs_json")"
+          printf 'Downstream run %s cancelled; Finalize=%s.\n' "$RUN_ID" "$cleanup_state"
+          [[ "$cleanup_state" == success ]]
