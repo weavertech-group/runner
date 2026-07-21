@@ -3,16 +3,16 @@ name: Private T3 Session
 on:
   workflow_dispatch:
     inputs:
-      target_id:
-        description: Target repository identifier
+      environment:
+        description: Target GitHub Environment
         required: true
-        type: string
+        type: environment
       enable_ssh:
         description: Enable Headscale/Tailscale access
         default: false
         type: boolean
       non_durable:
-        description: Finish after printing the T3 link
+        description: Finish after sending the T3 link
         default: false
         type: boolean
       ssh_public_key:
@@ -20,7 +20,7 @@ on:
         required: false
         type: string
 
-run-name: Private T3 session
+run-name: Private T3 session · ${{ inputs.environment }}
 
 permissions:
   contents: read
@@ -30,34 +30,11 @@ defaults:
     shell: bash
 
 jobs:
-  resolve-target:
-    name: Resolve target
-    runs-on: ubuntu-24.04
-    outputs:
-      environment_name: ${{ steps.resolve.outputs.environment_name }}
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - id: resolve
-        env:
-          TARGET_ID: ${{ inputs.target_id }}
-        run: |
-          set -euo pipefail
-
-          environment_name="$(awk -v id="$TARGET_ID" '$1 == id { print $2 }' .github/target-repositories.txt)"
-          [[ -n "$environment_name" ]]
-
-          printf 'environment_name=%s\n' "$environment_name" >> "$GITHUB_OUTPUT"
-
   session:
     name: Session
-    needs: resolve-target
     runs-on: ubuntu-24.04
     environment:
-      name: ${{ needs.resolve-target.outputs.environment_name }}
+      name: ${{ inputs.environment }}
 
     steps:
       - uses: actions/checkout@v4
@@ -66,7 +43,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22.23.1
+          node-version: 22
 
       - name: Define paths
         run: |
@@ -78,6 +55,8 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Install development tools
+        env:
+          CODEX_NON_INTERACTIVE: "1"
         run: |
           set -euo pipefail
 
@@ -90,6 +69,9 @@ jobs:
 
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           export PATH="$HOME/.local/bin:$PATH"
+
+          command -v codex
+          command -v claude
 
           codex --version
           claude --version
@@ -119,6 +101,9 @@ jobs:
         run: |
           set -euo pipefail
 
+          : "${HEADSCALE_URL:?HEADSCALE_URL is required when SSH is enabled}"
+          : "${HEADSCALE_AUTHKEY:?HEADSCALE_AUTHKEY is required when SSH is enabled}"
+
           curl -fsSL https://tailscale.com/install.sh | sh
 
           ts_args=(
@@ -138,6 +123,9 @@ jobs:
           TARGET_REPO_AUTH: ${{ secrets.TARGET_REPO_AUTH }}
         run: |
           set -euo pipefail
+
+          : "${TARGET_REPO:?TARGET_REPO is required}"
+          : "${TARGET_REPO_AUTH:?TARGET_REPO_AUTH is required}"
 
           git config --global credential.https://github.com.useHttpPath true
           git config --global credential.helper "store --file=$RUNNER_TEMP/target-repo-credential"
@@ -168,9 +156,14 @@ jobs:
 
       - name: Start T3 Code
         env:
+          ENVIRONMENT_NAME: ${{ inputs.environment }}
+          TARGET_REPO: ${{ secrets.TARGET_REPO }}
           NON_DURABLE: ${{ inputs.non_durable }}
+          LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
         run: |
           set -euo pipefail
+
+          : "${LARK_WEBHOOK_URL:?LARK_WEBHOOK_URL is required}"
 
           install -d -m 0700 "$SESSION_DIR/t3code"
 
@@ -190,14 +183,21 @@ jobs:
 
           tunnel_pid="$!"
 
-          t3_token=""
-          t3_backend_url=""
+          backend_url=""
+          pairing_token=""
 
           for _ in {1..30}; do
-            t3_backend_url="$(sed -nE 's#.*(https://[-a-z0-9]+[.]trycloudflare[.]com).*#\1#p' "$tunnel_log" | head -n1)"
-            t3_token="$(sed -nE 's/^.*Token:[[:space:]]*([^[:space:]]+).*$/\1/p' "$t3_log" | head -n1)"
+            backend_url="$(
+              sed -nE 's#.*(https://[-a-z0-9]+[.]trycloudflare[.]com).*#\1#p' "$tunnel_log" |
+              head -n1
+            )"
 
-            if [[ -n "$t3_backend_url" && -n "$t3_token" ]]; then
+            pairing_token="$(
+              sed -nE 's/^.*Token:[[:space:]]*([^[:space:]]+).*$/\1/p' "$t3_log" |
+              head -n1
+            )"
+
+            if [[ -n "$backend_url" && -n "$pairing_token" ]]; then
               break
             fi
 
@@ -216,26 +216,36 @@ jobs:
             sleep 1
           done
 
-          if [[ -z "$t3_backend_url" || -z "$t3_token" ]]; then
-            echo "Failed to create T3 pairing link." >&2
+          if [[ -z "$backend_url" || -z "$pairing_token" ]]; then
+            echo "Failed to create T3 link." >&2
             echo
             echo "cloudflared log:" >&2
             cat "$tunnel_log" >&2
             echo
-            echo "T3 log:" >&2
+            echo "T3 Code log:" >&2
             cat "$t3_log" >&2
             exit 1
           fi
 
-          t3_link="https://app.t3.codes/pair?host=${t3_backend_url}#token=${t3_token}"
+          t3_link="$(
+            node -e '
+              const host = encodeURIComponent(process.argv[1]);
+              const token = encodeURIComponent(process.argv[2]);
+              console.log(`https://app.t3.codes/pair?host=${host}#token=${token}`);
+            ' "$backend_url" "$pairing_token"
+          )"
 
-          printf '%s\n' "$t3_backend_url" > "$SESSION_DIR/t3code/backend-url"
-          printf '%s\n' "$t3_token" > "$SESSION_DIR/t3code/token"
+          printf '%s\n' "$backend_url" > "$SESSION_DIR/t3code/backend-url"
+          printf '%s\n' "$pairing_token" > "$SESSION_DIR/t3code/pairing-token"
           printf '%s\n' "$t3_link" > "$SESSION_DIR/t3code/link"
-          chmod 600 "$SESSION_DIR/t3code/backend-url" "$SESSION_DIR/t3code/token" "$SESSION_DIR/t3code/link"
+          chmod 600 "$SESSION_DIR/t3code/backend-url" "$SESSION_DIR/t3code/pairing-token" "$SESSION_DIR/t3code/link"
 
           {
             echo "### T3 Code"
+            echo
+            echo "**Environment:** \`$ENVIRONMENT_NAME\`"
+            echo
+            echo "**Repository:** \`$TARGET_REPO\`"
             echo
             echo "[Open T3 Code]($t3_link)"
             echo
@@ -244,13 +254,66 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+          payload="$(
+            T3_LINK="$t3_link" \
+            ENVIRONMENT_NAME="$ENVIRONMENT_NAME" \
+            TARGET_REPO="$TARGET_REPO" \
+            RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            node <<'NODE'
+          const payload = {
+            msg_type: "interactive",
+            card: {
+              header: {
+                title: {
+                  tag: "plain_text",
+                  content: "T3 Code ready"
+                }
+              },
+              elements: [
+                {
+                  tag: "div",
+                  text: {
+                    tag: "lark_md",
+                    content: `**Environment:** ${process.env.ENVIRONMENT_NAME}`
+                  }
+                },
+                {
+                  tag: "div",
+                  text: {
+                    tag: "lark_md",
+                    content: `**Repository:** ${process.env.TARGET_REPO}`
+                  }
+                },
+                {
+                  tag: "div",
+                  text: {
+                    tag: "lark_md",
+                    content: `[Open T3 Code](${process.env.T3_LINK})`
+                  }
+                },
+                {
+                  tag: "div",
+                  text: {
+                    tag: "lark_md",
+                    content: `[GitHub Actions run](${process.env.RUN_URL})`
+                  }
+                }
+              ]
+            }
+          };
+
+          console.log(JSON.stringify(payload));
+          NODE
+          )"
+
+          curl -fsS \
+            -H 'Content-Type: application/json' \
+            -d "$payload" \
+            "$LARK_WEBHOOK_URL"
+
           echo "T3 Code link:"
           echo "$t3_link"
 
           if [[ "$NON_DURABLE" != "true" ]]; then
             sleep infinity
           fi
-
-      - name: Keep SSH session alive
-        if: ${{ inputs.enable_ssh && ! inputs.non_durable && failure() }}
-        run: sleep infinity
