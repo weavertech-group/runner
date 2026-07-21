@@ -4,6 +4,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PRESET="$ROOT_DIR/.github/workflows/repo-01-t3code-session.yml"
+SMOKE="$ROOT_DIR/.github/workflows/repo-01-t3code-smoke.yml"
+MARKER="$ROOT_DIR/.github/repo-01-t3code-smoke.pending"
 PRIVATE_WORKFLOW="$ROOT_DIR/.github/workflows/private-runner-session.yml"
 ALLOWLIST="$ROOT_DIR/.github/target-repositories.txt"
 
@@ -12,8 +14,9 @@ fail() {
   exit 1
 }
 
-[[ -f "$PRESET" ]] || fail 'repo-01 T3 Code preset workflow is missing'
-[[ -f "$PRIVATE_WORKFLOW" ]] || fail 'private runner workflow is missing'
+for path in "$PRESET" "$SMOKE" "$MARKER" "$PRIVATE_WORKFLOW"; do
+  [[ -f "$path" ]] || fail "required preset file is missing: $path"
+done
 
 [[ "$(grep -Fc 'workflow_dispatch:' "$PRESET")" -eq 1 ]] || \
   fail 'preset must expose exactly one manual trigger'
@@ -45,6 +48,31 @@ if grep -Eq '(^|[[:space:]])(set -x|printenv|env)([[:space:]]|$)' "$PRESET"; the
 fi
 if grep -Eq 'HEADSCALE_AUTHKEY|TARGET_REPO_AUTH|LARK_WEBHOOK_(URL|SECRET)' "$PRESET"; then
   fail 'preset must not handle private session credentials directly'
+fi
+
+# The temporary smoke workflow is deliberately constrained to the reviewed marker
+# addition on main. It must verify T3/Lark readiness and cancel the long-running run.
+grep -Fq 'name: Repo 01 T3 Code Smoke' "$SMOKE" || fail 'smoke workflow name changed'
+grep -Fq 'branches:' "$SMOKE" || fail 'smoke trigger lacks branch restriction'
+grep -Fq '      - main' "$SMOKE" || fail 'smoke trigger is not limited to main'
+grep -Fq '      - .github/repo-01-t3code-smoke.pending' "$SMOKE" || \
+  fail 'smoke trigger is not limited to the one-time marker'
+grep -Fq "if: \${{ github.repository == 'weavertech-group/runner' }}" "$SMOKE" || \
+  fail 'smoke workflow lacks repository guard'
+grep -Fq 'timeout-minutes: 45' "$SMOKE" || fail 'smoke workflow lacks a bounded timeout'
+grep -Fq 'gh workflow run private-runner-session.yml' "$SMOKE" || \
+  fail 'smoke workflow does not dispatch the shared workflow'
+grep -Fq -- '--raw-field target_id=repo-01' "$SMOKE" || fail 'smoke target is not repo-01'
+grep -Fq -- '--raw-field enable_ssh=true' "$SMOKE" || fail 'smoke must enable SSH'
+grep -Fq -- '--raw-field enable_devspace=false' "$SMOKE" || fail 'smoke must disable DevSpace'
+grep -Fq -- '--raw-field enable_t3code=true' "$SMOKE" || fail 'smoke must enable T3 Code'
+grep -Fq 'Verify public T3 Code' "$SMOKE" || fail 'smoke does not wait for public T3 readiness'
+grep -Fq 'Report optional services online' "$SMOKE" || fail 'smoke does not wait for Lark reporting'
+grep -Fq 'gh run cancel "$RUN_ID"' "$SMOKE" || fail 'smoke does not cancel the session'
+grep -Fq '$steps["Finalize"]' "$SMOKE" || fail 'smoke does not verify final cleanup'
+
+if grep -Eq 'HEADSCALE_AUTHKEY|TARGET_REPO_AUTH|LARK_WEBHOOK_(URL|SECRET)' "$SMOKE"; then
+  fail 'smoke workflow must not handle downstream credentials directly'
 fi
 
 grep -Eq '^repo-01[[:space:]]+session--repo-01$' "$ALLOWLIST" || \
