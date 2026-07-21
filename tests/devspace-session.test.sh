@@ -3,6 +3,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PREPARE_SCRIPT="$ROOT_DIR/scripts/prepare-target-workspace.sh"
 START_SCRIPT="$ROOT_DIR/scripts/start-devspace.sh"
 CLEANUP_SCRIPT="$ROOT_DIR/scripts/cleanup.sh"
 TEMP_ROOT="$(mktemp -d)"
@@ -10,7 +11,7 @@ MOCK_BIN="$TEMP_ROOT/bin"
 MOCK_HOME="$TEMP_ROOT/home"
 MOCK_RUNNER_TEMP="$TEMP_ROOT/runner-temp"
 TOKEN='0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
-PUBLIC_URL='https://mock-tunnel.trycloudflare.com'
+PUBLIC_URL='https://mcp-repo-07.example.com'
 
 fail() {
   printf 'FAIL: %s\n' "$1" >&2
@@ -24,7 +25,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$MOCK_BIN" "$MOCK_HOME" "$MOCK_RUNNER_TEMP/private-runner-tools"
+mkdir -p "$MOCK_BIN" "$MOCK_HOME" "$MOCK_RUNNER_TEMP"
 
 cat > "$MOCK_BIN/npm" <<'MOCK'
 #!/usr/bin/env bash
@@ -55,21 +56,20 @@ trap 'exit 0' TERM INT
 while :; do sleep 10; done
 MOCK
 
-cat > "$MOCK_RUNNER_TEMP/private-runner-tools/cloudflared" <<MOCK
-#!/usr/bin/env bash
-printf '%s\\n' '$PUBLIC_URL'
-trap 'exit 0' TERM INT
-while :; do sleep 10; done
-MOCK
+chmod 0755 "$MOCK_BIN"/*
 
-chmod 0755 "$MOCK_BIN"/* "$MOCK_RUNNER_TEMP/private-runner-tools/cloudflared"
+PATH="$MOCK_BIN:$PATH" \
+HOME="$MOCK_HOME" \
+RUNNER_TEMP="$MOCK_RUNNER_TEMP" \
+TARGET_REPO='owner/repository' \
+  bash "$PREPARE_SCRIPT" >/dev/null
 
 stdout_file="$TEMP_ROOT/stdout"
 stderr_file="$TEMP_ROOT/stderr"
 PATH="$MOCK_BIN:$PATH" \
 HOME="$MOCK_HOME" \
 RUNNER_TEMP="$MOCK_RUNNER_TEMP" \
-TARGET_REPO='owner/repository' \
+DEVSPACE_PUBLIC_URL="$PUBLIC_URL" \
   bash "$START_SCRIPT" >"$stdout_file" 2>"$stderr_file"
 
 connection_dir="$MOCK_HOME/private-runner-session/devspace"
@@ -78,7 +78,7 @@ connection_file="$connection_dir/connection.txt"
 [[ "$(stat -c '%a' "$connection_file")" == '600' ]] || \
   fail 'connection file permissions are not private'
 grep -Fxq "MCP_URL=$PUBLIC_URL/mcp" "$connection_file" || \
-  fail 'connection file does not contain the MCP URL'
+  fail 'connection file does not contain the fixed MCP URL'
 grep -Fxq "OWNER_TOKEN=$TOKEN" "$connection_file" || \
   fail 'connection file does not contain the owner token'
 
@@ -99,11 +99,11 @@ invalid_output="$(
   HOME="$MOCK_HOME" \
   RUNNER_TEMP="$MOCK_RUNNER_TEMP" \
   TARGET_REPO='' \
-    bash "$START_SCRIPT" 2>&1
+    bash "$PREPARE_SCRIPT" 2>&1
 )"
 invalid_status=$?
 set -e
-[[ "$invalid_status" -eq 50 ]] || fail 'missing target did not return E50'
-[[ "$invalid_output" == 'E50' ]] || fail 'missing target exposed unexpected output'
+[[ "$invalid_status" -eq 53 ]] || fail 'missing target did not return E53'
+[[ "$invalid_output" == 'E53' ]] || fail 'missing target exposed unexpected output'
 
 printf 'devspace session tests passed\n'

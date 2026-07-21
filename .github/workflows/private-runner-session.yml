@@ -17,6 +17,11 @@ on:
         required: false
         default: false
         type: boolean
+      enable_t3code:
+        description: Start T3 Code for the selected target repository
+        required: false
+        default: false
+        type: boolean
       ssh_public_key:
         description: Optional fallback Ed25519 public key
         required: false
@@ -29,7 +34,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: private-runner-${{ github.run_id }}
+  group: private-runner-${{ inputs.target_id || github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -74,7 +79,7 @@ jobs:
           persist-credentials: false
 
       - name: Validate optional service request
-        if: ${{ inputs.enable_devspace && (inputs.target_id == '' || ! inputs.enable_ssh) }}
+        if: ${{ (inputs.enable_devspace || inputs.enable_t3code) && (inputs.target_id == '' || ! inputs.enable_ssh) }}
         shell: bash
         run: |
           printf 'E50\n' >&2
@@ -238,14 +243,77 @@ jobs:
             "$HOME/private-runner-session/setup-status" \
             "$HOME/private-runner-session/setup-details"
 
-      - name: Start optional service
-        if: ${{ inputs.enable_devspace && steps.fixed-verify.outcome == 'success' }}
+      - name: Validate optional service prerequisites
+        if: ${{ inputs.enable_devspace || inputs.enable_t3code }}
+        shell: bash
+        env:
+          ENABLE_DEVSPACE: ${{ inputs.enable_devspace }}
+          ENABLE_T3CODE: ${{ inputs.enable_t3code }}
+          FIXED_VERIFY: ${{ steps.fixed-verify.outcome }}
+          COMPLETE_VERIFY: ${{ steps.complete-verify.outcome }}
+        run: |
+          set -euo pipefail
+          if [[ "$ENABLE_DEVSPACE" == true && "$FIXED_VERIFY" != success ]]; then
+            printf 'E52\n' >&2
+            exit 52
+          fi
+          if [[ "$ENABLE_T3CODE" == true && "$COMPLETE_VERIFY" != success ]]; then
+            printf 'E62\n' >&2
+            exit 62
+          fi
+
+      - name: Install optional service tools
+        if: ${{ inputs.enable_devspace || inputs.enable_t3code }}
+        shell: bash
+        env:
+          ENABLE_T3CODE: ${{ inputs.enable_t3code }}
+        run: |
+          bash scripts/install-cloudflared.sh
+          if [[ "$ENABLE_T3CODE" == true ]]; then
+            bash scripts/install-t3code.sh
+          fi
+
+      - name: Prepare target workspace
+        if: ${{ inputs.enable_devspace || inputs.enable_t3code }}
         shell: bash
         env:
           TARGET_REPO: ${{ secrets.TARGET_REPO }}
-        run: |
-          bash scripts/install-cloudflared.sh
-          bash scripts/start-devspace.sh
+        run: bash scripts/prepare-target-workspace.sh
+
+      - name: Start DevSpace
+        if: ${{ inputs.enable_devspace }}
+        shell: bash
+        env:
+          DEVSPACE_PUBLIC_URL: ${{ secrets.DEVSPACE_PUBLIC_URL }}
+        run: bash scripts/start-devspace.sh
+
+      - name: Start T3 Code
+        if: ${{ inputs.enable_t3code }}
+        shell: bash
+        env:
+          T3_PUBLIC_URL: ${{ secrets.T3_PUBLIC_URL }}
+        run: bash scripts/start-t3code.sh
+
+      - name: Start named Cloudflare Tunnel
+        if: ${{ inputs.enable_devspace || inputs.enable_t3code }}
+        shell: bash
+        env:
+          CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
+          DEVSPACE_PUBLIC_URL: ${{ secrets.DEVSPACE_PUBLIC_URL }}
+          ENABLE_DEVSPACE: ${{ inputs.enable_devspace }}
+          ENABLE_T3CODE: ${{ inputs.enable_t3code }}
+          T3_PUBLIC_URL: ${{ secrets.T3_PUBLIC_URL }}
+        run: bash scripts/start-cloudflare-tunnel.sh
+
+      - name: Verify public optional services
+        if: ${{ inputs.enable_devspace || inputs.enable_t3code }}
+        shell: bash
+        env:
+          DEVSPACE_PUBLIC_URL: ${{ secrets.DEVSPACE_PUBLIC_URL }}
+          ENABLE_DEVSPACE: ${{ inputs.enable_devspace }}
+          ENABLE_T3CODE: ${{ inputs.enable_t3code }}
+          T3_PUBLIC_URL: ${{ secrets.T3_PUBLIC_URL }}
+        run: bash scripts/verify-public-services.sh
 
       - name: Execute
         if: ${{ inputs.enable_ssh }}

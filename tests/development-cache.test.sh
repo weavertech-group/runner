@@ -71,8 +71,8 @@ grep -Fq 'DEVELOPMENT_CACHE_HIT: ${{ steps.development-cache.outputs.cache-hit }
 
 fixed_save_line="$(grep -n -- '- name: Save development environment cache' "$WORKFLOW" | cut -d: -f1)"
 ai_install_line="$(grep -n -- '- name: Install AI coding CLIs' "$WORKFLOW" | cut -d: -f1)"
-devspace_line="$(grep -n -- '- name: Start optional service' "$WORKFLOW" | cut -d: -f1)"
-[[ "$fixed_save_line" -lt "$ai_install_line" && "$fixed_save_line" -lt "$devspace_line" ]] || \
+service_prerequisite_line="$(grep -n -- '- name: Validate optional service prerequisites' "$WORKFLOW" | cut -d: -f1)"
+[[ "$fixed_save_line" -lt "$ai_install_line" && "$fixed_save_line" -lt "$service_prerequisite_line" ]] || \
   fail 'fixed development cache is not saved immediately after fixed verification'
 
 fixed_save_block="$(sed -n '/- name: Save development environment cache/,/- name: Install AI coding CLIs/p' "$WORKFLOW")"
