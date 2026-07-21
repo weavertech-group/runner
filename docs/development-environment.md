@@ -39,6 +39,22 @@ Codex CLI and Claude Code are the deliberate exceptions. The workflow installs `
 
 Downloaded uv and Kubernetes plugin archives are verified against pinned SHA-256 checksums. mise is installed from a versioned immutable release, and GitHub artifact-attestation verification is explicitly enabled for tool backends that support it.
 
+## Cross-session cache
+
+The privileged workflow restores and saves a GitHub Actions cache for the slowest fixed development components:
+
+- mise-installed Python, Go, Rust, Terraform, and OpenTofu toolchains;
+- mise shims;
+- the Playwright Chromium browser cache;
+- the compiled `migrate` binary;
+- the pinned uv, uvx, and mise executables.
+
+The cache key contains the operating system, architecture, and the hash of `scripts/development-versions.env`. Changing any pinned version automatically creates a fresh cache. Prefix restore keys are deliberately not used, so a session never restores a cache built for a different version manifest.
+
+On an exact cache hit, the installer reuses the restored toolchains and binaries. Ubuntu packages, Corepack, pnpm, Yarn, the Playwright CLI, Kubernetes plugins, Codex CLI, and Claude Code are still refreshed during every session. Playwright checks the restored browser cache and avoids downloading Chromium again when the required build is already present.
+
+The cache is saved before the long-running `Execute` step. Restore and save steps are best effort: a cache service failure falls back to the normal installation path and does not prevent the private runner session from starting.
+
 ## Project dependencies
 
 The runner does not automatically execute dependency installation from a selected target repository. Commands such as `npm install`, package lifecycle scripts, Python build hooks, and Rust build scripts execute repository-controlled code. Automatically running them before the operator connects would expand the trusted workflow boundary.
@@ -75,6 +91,7 @@ For local static validation:
 
 ```bash
 bash tests/workflow-security.test.sh
+bash tests/development-cache.test.sh
 bash -n scripts/*.sh tests/*.sh
 ```
 
