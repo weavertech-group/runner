@@ -18,6 +18,11 @@ print(json.load(open(sys.argv[1], encoding="utf-8"))["content"]["text"])
 PY
 }
 
+reset_delivery_state() {
+  rm -rf "$HOME/private-runner-session/lark-events"
+  rm -f "$MOCK_PAYLOAD"
+}
+
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 export HOME="$tmp/home"
@@ -76,7 +81,8 @@ if grep -Fq '#token=' <<< "$text"; then
   fail 'T3 pairing URL was sent without opt-in'
 fi
 
-# Exact repository opt-in includes only the matching temporary access material.
+# Reset successful markers to exercise the explicit opt-in formatting path.
+reset_delivery_state
 export LARK_WEBHOOK_INCLUDE_TEMPORARY_ACCESS=true
 SESSION_SERVICE=devspace bash "$REPORTER" service-online >/dev/null 2>&1
 text="$(message_text "$MOCK_PAYLOAD")"
@@ -93,10 +99,10 @@ if grep -Fq "$(<"$HOME/private-runner-session/devspace/owner-token")" <<< "$text
 fi
 
 # A pairing URL from another origin is rejected without public output or a request.
+reset_delivery_state
 printf 'https://other.trycloudflare.com/pair#token=wrong-origin\n' > \
   "$HOME/private-runner-session/t3code/pairing-url"
 chmod 0600 "$HOME/private-runner-session/t3code/pairing-url"
-rm -f "$MOCK_PAYLOAD"
 output="$(SESSION_SERVICE=t3code bash "$REPORTER" service-online 2>&1)" || \
   fail 'invalid temporary access failed the runner caller'
 [[ -z "$output" ]] || fail 'invalid temporary access produced public output'

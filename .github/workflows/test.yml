@@ -54,6 +54,10 @@ jobs:
         shell: bash
         run: bash tests/lark-services.test.sh
 
+      - name: Test Lark Webhook MVP
+        shell: bash
+        run: bash tests/lark-mvp.test.sh
+
       - name: Test development cache
         shell: bash
         run: bash tests/development-cache.test.sh
