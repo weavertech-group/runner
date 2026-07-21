@@ -78,9 +78,6 @@ jobs:
     name: T3 installation integration
     runs-on: ubuntu-24.04
     timeout-minutes: 10
-    permissions:
-      contents: read
-      issues: write
     steps:
       - name: Check out repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -106,26 +103,11 @@ jobs:
           T3_INSTALL_DIAGNOSTIC_OUTPUT: ${{ runner.temp }}/t3-install-sanitized.log
         run: bash tests/t3code-install.integration.sh
 
-      - name: Report sanitized installation failure
-        if: ${{ failure() && github.event_name == 'pull_request' }}
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          DIAGNOSTIC_PATH: ${{ runner.temp }}/t3-install-sanitized.log
-        run: |
-          set -euo pipefail
-          body_file="$(mktemp)"
-          {
-            printf '%s\n\n' 'Real T3 installation failed on GitHub-hosted Ubuntu 24.04.'
-            printf '%s\n' 'Sanitized npm/node-gyp diagnostics:'
-            printf '%s\n' '```text'
-            if [[ -r "$DIAGNOSTIC_PATH" ]]; then
-              head -n 160 "$DIAGNOSTIC_PATH"
-            else
-              printf '%s\n' 'No sanitized diagnostic file was produced.'
-            fi
-            printf '%s\n' '```'
-          } > "$body_file"
-          gh pr comment "$PR_NUMBER" --body-file "$body_file"
-          rm -f "$body_file"
+      - name: Upload sanitized installation diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: t3-install-sanitized-${{ github.run_id }}
+          path: ${{ runner.temp }}/t3-install-sanitized.log
+          if-no-files-found: error
+          retention-days: 1
