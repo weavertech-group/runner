@@ -4,7 +4,8 @@ set -u
 
 runner_temp="${RUNNER_TEMP:-/tmp}"
 diagnostic_dir="$runner_temp/private-runner-diagnostics"
-connection_root="${HOME:-/home/runner}/private-runner-session"
+devspace_connection_dir="${HOME:-/home/runner}/private-runner-session/devspace"
+t3code_connection_dir="${HOME:-/home/runner}/private-runner-session/t3code"
 
 stop_process_group() {
   local pid_file="$1"
@@ -26,7 +27,7 @@ stop_process_group "$diagnostic_dir/cloudflared.pid"
 stop_process_group "$diagnostic_dir/t3code.pid"
 stop_process_group "$diagnostic_dir/devspace.pid"
 rm -f "$diagnostic_dir/cloudflared-token"
-rm -rf "$connection_root/devspace" "$connection_root/t3code"
+rm -rf "$devspace_connection_dir" "$t3code_connection_dir"
 rm -rf \
   "$runner_temp/target-workspace" \
   "$runner_temp/devspace-state" \
