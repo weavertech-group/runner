@@ -42,8 +42,9 @@ fi
 
 grep -Fq 'enable_t3code:' "$WORKFLOW" || \
   fail 'T3 Code must remain an explicit workflow opt-in'
-grep -Fq 'group: private-runner-${{ github.run_id }}' "$WORKFLOW" || \
-  fail 'Quick Tunnel sessions must remain independent by workflow run'
+if grep -Fq 'concurrency:' "$WORKFLOW"; then
+  fail 'independent ephemeral sessions must not use redundant or target-wide concurrency locking'
+fi
 grep -Fq '(inputs.enable_devspace || inputs.enable_t3code)' "$WORKFLOW" || \
   fail 'optional service validation does not cover T3 Code'
 grep -Fq 'bash scripts/start-quick-tunnels.sh' "$WORKFLOW" || \

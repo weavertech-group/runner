@@ -67,7 +67,7 @@ connect_line="$(line_of 'Connect')"
 ssh_line="$(line_of 'Report SSH online')"
 publish_line="$(line_of 'Publish development environment status')"
 status_line="$(line_of 'Report development environment status')"
-execute_line="$(line_of 'Execute')"
+hold_line="$(line_of 'Keep session alive')"
 offline_line="$(line_of 'Report session offline')"
 finalize_line="$(line_of 'Finalize')"
 
@@ -75,8 +75,8 @@ finalize_line="$(line_of 'Finalize')"
   fail 'starting event must be after cache restore and before network setup'
 [[ "$connect_line" -lt "$ssh_line" ]] || fail 'SSH event must follow connection'
 [[ "$publish_line" -lt "$status_line" ]] || fail 'setup event must follow published status'
-[[ "$execute_line" -lt "$offline_line" && "$offline_line" -lt "$finalize_line" ]] || \
-  fail 'offline event must be attempted before cleanup'
+[[ "$hold_line" -lt "$offline_line" && "$offline_line" -lt "$finalize_line" ]] || \
+  fail 'offline event must be attempted after the durable hold and before cleanup'
 
 grep -Fq 'id: connect' "$WORKFLOW" || fail 'Connect step needs a stable outcome ID'
 if grep -Eq 'OWNER_TOKEN|PAIRING_URL|owner-token|pairing-url' \
@@ -84,6 +84,20 @@ if grep -Eq 'OWNER_TOKEN|PAIRING_URL|owner-token|pairing-url' \
   fail 'ordinary lifecycle reporting references temporary service access material'
 fi
 
+input_block="$(sed -n '/non_durable:/,/ssh_public_key:/p' "$WORKFLOW")"
+hold_block="$(step_block 'Keep session alive' 'Report session offline')"
+grep -Fq 'default: false' <<< "$input_block" || fail 'non_durable must default to false'
+grep -Fq 'type: boolean' <<< "$input_block" || fail 'non_durable must be a boolean input'
+grep -Fq 'if: ${{ inputs.enable_ssh && ! inputs.non_durable }}' <<< "$hold_block" || \
+  fail 'non-durable sessions must skip only the durable hold'
+grep -Fq 'run: sleep infinity' <<< "$hold_block" || fail 'durable sessions must remain active'
+grep -Fq 'if: ${{ always() }}' <<< "$offline_block" || \
+  fail 'offline reporting must run for non-durable sessions'
+finalize_block="$(sed -n '/- name: Finalize/,$p' "$WORKFLOW")"
+grep -Fq 'if: ${{ always() }}' <<< "$finalize_block" || \
+  fail 'finalization must run for non-durable sessions'
+
+# The reporter must normalize an empty optional target.
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 export HOME="$tmp/home"
