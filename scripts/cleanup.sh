@@ -5,8 +5,8 @@ set -u
 runner_temp="${RUNNER_TEMP:-/tmp}"
 diagnostic_dir="$runner_temp/private-runner-diagnostics"
 session_dir="${HOME:-/home/runner}/private-runner-session"
-devspace_connection_dir="$session_dir/devspace"
-t3code_connection_dir="$session_dir/t3code"
+devspace_connection_dir="${HOME:-/home/runner}/private-runner-session/devspace"
+t3code_connection_dir="${HOME:-/home/runner}/private-runner-session/t3code"
 lark_event_dir="$session_dir/lark-events"
 lark_expiry_file="$session_dir/lark-session-expiry"
 
