@@ -133,8 +133,9 @@ fi
 [[ ! -e "$MOCK_PAYLOAD" ]] || fail 'unknown service reached Webhook'
 
 # Missing configuration is best effort and writes only a private stable diagnostic.
+unset SESSION_SERVICE
 unset LARK_WEBHOOK_SECRET
-output="$(bash "$REPORTER" starting 2>&1)" || fail 'missing configuration failed the caller'
+output="$(bash "$REPORTER" offline 2>&1)" || fail 'missing configuration failed the caller'
 [[ -z "$output" ]] || fail 'missing configuration exposed output'
 diagnostic="$RUNNER_TEMP/private-runner-diagnostics/lark-webhook.log"
 [[ -f "$diagnostic" ]] || fail 'missing configuration diagnostic was not written'
