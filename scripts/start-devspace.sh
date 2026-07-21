@@ -3,13 +3,13 @@
 set -euo pipefail
 
 runner_temp="${RUNNER_TEMP:?RUNNER_TEMP is required}"
-public_url="${DEVSPACE_PUBLIC_URL-}"
 diagnostic_dir="$runner_temp/private-runner-diagnostics"
 workspace="$runner_temp/target-workspace"
 state_dir="$runner_temp/devspace-state"
 worktree_dir="$runner_temp/devspace-worktrees"
 config_dir="$runner_temp/devspace-config"
 connection_dir="${HOME:?HOME is required}/private-runner-session/devspace"
+public_url_file="$diagnostic_dir/devspace-public-url"
 setup_log="$diagnostic_dir/devspace-setup.log"
 devspace_log="$diagnostic_dir/devspace.log"
 devspace_pid_file="$diagnostic_dir/devspace.pid"
@@ -20,21 +20,15 @@ fail() {
   exit 52
 }
 
-normalize_https_origin() {
-  local value="$1"
-  if [[ ! "$value" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/?$ ]]; then
-    return 1
-  fi
-  printf '%s\n' "${value%/}"
-}
-
 umask 077
 install -d -m 0700 "$diagnostic_dir" "$connection_dir" || fail
 : > "$setup_log" || fail
 chmod 0600 "$setup_log" || fail
 command -v setsid >/dev/null 2>&1 || fail
 [[ -d "$workspace/.git" ]] || fail
-public_url="$(normalize_https_origin "$public_url")" || fail
+[[ -r "$public_url_file" ]] || fail
+public_url="$(<"$public_url_file")"
+[[ "$public_url" =~ ^https://[-a-z0-9]+[.]trycloudflare[.]com$ ]] || fail
 
 if ! timeout 300 npm install --global --no-audit --no-fund "$devspace_package" \
   >> "$setup_log" 2>&1; then
