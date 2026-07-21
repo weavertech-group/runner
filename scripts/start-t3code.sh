@@ -3,11 +3,11 @@
 set -euo pipefail
 
 runner_temp="${RUNNER_TEMP:?RUNNER_TEMP is required}"
-public_url="${T3_PUBLIC_URL-}"
 diagnostic_dir="$runner_temp/private-runner-diagnostics"
 workspace="$runner_temp/target-workspace"
 t3_home="$runner_temp/t3code-home"
 connection_dir="${HOME:?HOME is required}/private-runner-session/t3code"
+public_url_file="$diagnostic_dir/t3code-public-url"
 setup_log="$diagnostic_dir/t3code-setup.log"
 t3_log="$diagnostic_dir/t3code.log"
 t3_pid_file="$diagnostic_dir/t3code.pid"
@@ -15,14 +15,6 @@ t3_pid_file="$diagnostic_dir/t3code.pid"
 fail() {
   printf 'E62\n' >&2
   exit 62
-}
-
-normalize_https_origin() {
-  local value="$1"
-  if [[ ! "$value" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/?$ ]]; then
-    return 1
-  fi
-  printf '%s\n' "${value%/}"
 }
 
 umask 077
@@ -34,7 +26,9 @@ command -v setsid >/dev/null 2>&1 || fail
 t3_bin="$(command -v t3 || true)"
 [[ -n "$t3_bin" && -x "$t3_bin" ]] || fail
 [[ -d "$workspace/.git" ]] || fail
-public_url="$(normalize_https_origin "$public_url")" || fail
+[[ -r "$public_url_file" ]] || fail
+public_url="$(<"$public_url_file")"
+[[ "$public_url" =~ ^https://[-a-z0-9]+[.]trycloudflare[.]com$ ]] || fail
 
 if ! timeout 120 "$t3_bin" project add \
   --base-dir "$t3_home" \
