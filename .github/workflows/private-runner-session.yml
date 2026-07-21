@@ -34,7 +34,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: private-runner-${{ inputs.target_id || github.run_id }}
+  group: private-runner-${{ github.run_id }}
   cancel-in-progress: false
 
 jobs:
@@ -280,39 +280,30 @@ jobs:
           TARGET_REPO: ${{ secrets.TARGET_REPO }}
         run: bash scripts/prepare-target-workspace.sh
 
+      - name: Start Cloudflare Quick Tunnels
+        if: ${{ inputs.enable_devspace || inputs.enable_t3code }}
+        shell: bash
+        env:
+          ENABLE_DEVSPACE: ${{ inputs.enable_devspace }}
+          ENABLE_T3CODE: ${{ inputs.enable_t3code }}
+        run: bash scripts/start-quick-tunnels.sh
+
       - name: Start DevSpace
         if: ${{ inputs.enable_devspace }}
         shell: bash
-        env:
-          DEVSPACE_PUBLIC_URL: ${{ secrets.DEVSPACE_PUBLIC_URL }}
         run: bash scripts/start-devspace.sh
 
       - name: Start T3 Code
         if: ${{ inputs.enable_t3code }}
         shell: bash
-        env:
-          T3_PUBLIC_URL: ${{ secrets.T3_PUBLIC_URL }}
         run: bash scripts/start-t3code.sh
-
-      - name: Start named Cloudflare Tunnel
-        if: ${{ inputs.enable_devspace || inputs.enable_t3code }}
-        shell: bash
-        env:
-          CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
-          DEVSPACE_PUBLIC_URL: ${{ secrets.DEVSPACE_PUBLIC_URL }}
-          ENABLE_DEVSPACE: ${{ inputs.enable_devspace }}
-          ENABLE_T3CODE: ${{ inputs.enable_t3code }}
-          T3_PUBLIC_URL: ${{ secrets.T3_PUBLIC_URL }}
-        run: bash scripts/start-cloudflare-tunnel.sh
 
       - name: Verify public optional services
         if: ${{ inputs.enable_devspace || inputs.enable_t3code }}
         shell: bash
         env:
-          DEVSPACE_PUBLIC_URL: ${{ secrets.DEVSPACE_PUBLIC_URL }}
           ENABLE_DEVSPACE: ${{ inputs.enable_devspace }}
           ENABLE_T3CODE: ${{ inputs.enable_t3code }}
-          T3_PUBLIC_URL: ${{ secrets.T3_PUBLIC_URL }}
         run: bash scripts/verify-public-services.sh
 
       - name: Execute
