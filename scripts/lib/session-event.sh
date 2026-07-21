@@ -135,7 +135,7 @@ session_event_build() {
   local event="$1"
   local now_epoch=''
   local expiry_epoch=''
-  local target_id="${SESSION_TARGET_ID-none}"
+  local target_id="${SESSION_TARGET_ID:-none}"
   local service="${SESSION_SERVICE-}"
   local repository="${GITHUB_REPOSITORY-}"
   local server_url="${GITHUB_SERVER_URL-https://github.com}"
