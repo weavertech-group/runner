@@ -69,3 +69,53 @@ jobs:
       - name: Check shell syntax
         shell: bash
         run: bash -n scripts/*.sh scripts/lib/*.sh tests/*.sh
+
+  t3-install-integration:
+    name: T3 installation integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Prepare Node runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.23.1
+
+      - name: Prepare native build tools
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            build-essential \
+            python3
+
+      - name: Install and verify real T3 package
+        id: t3-install
+        continue-on-error: true
+        shell: bash
+        env:
+          T3_INSTALL_DIAGNOSTIC_OUTPUT: ${{ runner.temp }}/t3-install-sanitized.log
+        run: bash tests/t3code-install.integration.sh
+
+      - name: Verify sanitized installation diagnostics
+        if: ${{ steps.t3-install.outcome == 'failure' }}
+        shell: bash
+        run: test -s "${{ runner.temp }}/t3-install-sanitized.log"
+
+      - name: Upload sanitized installation diagnostics
+        if: ${{ steps.t3-install.outcome == 'failure' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: t3-install-sanitized-${{ github.run_id }}
+          path: ${{ runner.temp }}/t3-install-sanitized.log
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Enforce real T3 installation result
+        if: ${{ steps.t3-install.outcome == 'failure' }}
+        shell: bash
+        run: exit 1
