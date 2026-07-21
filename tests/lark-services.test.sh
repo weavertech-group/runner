@@ -52,12 +52,14 @@ export LARK_WEBHOOK_URL=https://open.larksuite.com/open-apis/bot/v2/hook/test-ho
 export LARK_WEBHOOK_SECRET=test-signing-secret
 
 printf 'ready\n' > "$HOME/private-runner-session/setup-status"
+printf 'active\n' > "$HOME/private-runner-session/lark-session-active"
 printf 'https://dev-test.trycloudflare.com/mcp\n' > "$HOME/private-runner-session/devspace/mcp-url"
 printf '%064d\n' 0 | tr '0' 'a' > "$HOME/private-runner-session/devspace/owner-token"
 printf 'https://t3-test.trycloudflare.com\n' > "$HOME/private-runner-session/t3code/t3-url"
 printf 'https://t3-test.trycloudflare.com/pair#token=test_pairing-token.1\n' > \
   "$HOME/private-runner-session/t3code/pairing-url"
 chmod 0600 "$HOME/private-runner-session/setup-status" \
+  "$HOME/private-runner-session/lark-session-active" \
   "$HOME/private-runner-session/devspace/mcp-url" \
   "$HOME/private-runner-session/devspace/owner-token" \
   "$HOME/private-runner-session/t3code/t3-url" \
