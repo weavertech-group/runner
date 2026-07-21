@@ -23,10 +23,14 @@ stop_process_group() {
   kill -KILL -- "-$pid" >/dev/null 2>&1 || kill -KILL "$pid" >/dev/null 2>&1 || true
 }
 
-stop_process_group "$diagnostic_dir/cloudflared.pid"
+# Quick Tunnels use per-service PID files instead of a shared cloudflared.pid.
+stop_process_group "$diagnostic_dir/cloudflared-t3code.pid"
+stop_process_group "$diagnostic_dir/cloudflared-devspace.pid"
 stop_process_group "$diagnostic_dir/t3code.pid"
 stop_process_group "$diagnostic_dir/devspace.pid"
-rm -f "$diagnostic_dir/cloudflared-token"
+rm -f \
+  "$diagnostic_dir/t3code-public-url" \
+  "$diagnostic_dir/devspace-public-url"
 rm -rf "$devspace_connection_dir" "$t3code_connection_dir"
 rm -rf \
   "$runner_temp/target-workspace" \
