@@ -55,13 +55,13 @@ export LARK_WEBHOOK_SECRET=test-signing-secret
 
 # Disabled reporting is a successful no-op and makes no HTTP request.
 export LARK_REPORTING_ENABLED=false
-output="$($REPORTER starting 2>&1)" || fail 'disabled reporting failed'
+output="$(bash "$REPORTER" starting 2>&1)" || fail 'disabled reporting failed'
 [[ -z "$output" ]] || fail 'disabled reporting produced output'
 [[ ! -e "$MOCK_PAYLOAD" ]] || fail 'disabled reporting called curl'
 
 # Enabled reporting creates a correctly signed fixed text payload.
 export LARK_REPORTING_ENABLED=true
-output="$($REPORTER starting 2>&1)" || fail 'starting report failed'
+output="$(bash "$REPORTER" starting 2>&1)" || fail 'starting report failed'
 [[ -z "$output" ]] || fail 'successful reporting produced public output'
 [[ "$(<"$MOCK_URL")" == "$LARK_WEBHOOK_URL" ]] || fail 'wrong webhook destination'
 assert_json "$MOCK_PAYLOAD" 'value["timestamp"] == "1784600000"' || fail 'wrong timestamp'
@@ -85,7 +85,7 @@ PY
 # Expiry is persisted once per run and reused across events.
 expiry_first="$(<"$HOME/private-runner-session/lark-session-expiry")"
 export SESSION_EVENT_NOW_EPOCH=1784600300
-$REPORTER setup-ready >/dev/null 2>&1 || fail 'ready report failed'
+bash "$REPORTER" setup-ready >/dev/null 2>&1 || fail 'ready report failed'
 expiry_second="$(<"$HOME/private-runner-session/lark-session-expiry")"
 [[ "$expiry_first" == "$expiry_second" ]] || fail 'expiry changed within one session'
 [[ "$(stat -c '%a' "$HOME/private-runner-session/lark-session-expiry")" == 600 ]] || \
@@ -100,7 +100,7 @@ printf '%s\n' 'fake-owner-token-must-not-leak' > \
 chmod 0600 "$HOME/private-runner-session/devspace/mcp-url" \
   "$HOME/private-runner-session/devspace/owner-token"
 export SESSION_SERVICE=devspace
-$REPORTER service-online >/dev/null 2>&1 || fail 'DevSpace service report failed'
+bash "$REPORTER" service-online >/dev/null 2>&1 || fail 'DevSpace service report failed'
 assert_json "$MOCK_PAYLOAD" '"DevSpace online" in value["content"]["text"]' || fail 'DevSpace message missing'
 assert_json "$MOCK_PAYLOAD" '"https://devspace-test.trycloudflare.com/mcp" in value["content"]["text"]' || fail 'DevSpace URL missing'
 if grep -Fq 'fake-owner-token-must-not-leak' "$MOCK_PAYLOAD"; then
@@ -122,19 +122,19 @@ fi
 
 # Unknown events and services are rejected before any request is sent.
 rm -f "$MOCK_PAYLOAD"
-if $REPORTER unknown-event >/dev/null 2>&1; then
+if bash "$REPORTER" unknown-event >/dev/null 2>&1; then
   fail 'unknown event was accepted'
 fi
 [[ ! -e "$MOCK_PAYLOAD" ]] || fail 'unknown event reached Webhook'
 export SESSION_SERVICE=unknown
-if $REPORTER service-online >/dev/null 2>&1; then
+if bash "$REPORTER" service-online >/dev/null 2>&1; then
   fail 'unknown service was accepted'
 fi
 [[ ! -e "$MOCK_PAYLOAD" ]] || fail 'unknown service reached Webhook'
 
 # Missing configuration is best effort and writes only a private stable diagnostic.
 unset LARK_WEBHOOK_SECRET
-output="$($REPORTER starting 2>&1)" || fail 'missing configuration failed the caller'
+output="$(bash "$REPORTER" starting 2>&1)" || fail 'missing configuration failed the caller'
 [[ -z "$output" ]] || fail 'missing configuration exposed output'
 diagnostic="$RUNNER_TEMP/private-runner-diagnostics/lark-webhook.log"
 [[ -f "$diagnostic" ]] || fail 'missing configuration diagnostic was not written'
