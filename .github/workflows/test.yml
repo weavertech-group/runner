@@ -42,6 +42,10 @@ jobs:
         shell: bash
         run: bash tests/quick-tunnel.test.sh
 
+      - name: Test Lark Webhook foundation
+        shell: bash
+        run: bash tests/lark-webhook.test.sh
+
       - name: Test development cache
         shell: bash
         run: bash tests/development-cache.test.sh
@@ -52,4 +56,4 @@ jobs:
 
       - name: Check shell syntax
         shell: bash
-        run: bash -n scripts/*.sh tests/*.sh
+        run: bash -n scripts/*.sh scripts/lib/*.sh tests/*.sh
