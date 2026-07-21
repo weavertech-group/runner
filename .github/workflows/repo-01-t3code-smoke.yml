@@ -10,6 +10,7 @@ on:
 permissions:
   actions: write
   contents: read
+  issues: write
 
 concurrency:
   group: repo-01-t3code-smoke
@@ -37,6 +38,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
+          ORCHESTRATOR_RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
           started_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
@@ -61,9 +63,11 @@ jobs:
           [[ "$run_id" =~ ^[0-9]+$ ]]
           printf 'run_id=%s\n' "$run_id" >> "$GITHUB_OUTPUT"
           printf 'run_url=https://github.com/%s/actions/runs/%s\n' "$REPOSITORY" "$run_id" >> "$GITHUB_OUTPUT"
+          gh issue comment 24 --repo "$REPOSITORY" --body "Smoke started: orchestrator https://github.com/$REPOSITORY/actions/runs/$ORCHESTRATOR_RUN_ID; downstream https://github.com/$REPOSITORY/actions/runs/$run_id"
           printf 'Dispatched downstream run %s.\n' "$run_id"
 
       - name: Wait for T3 Code and Lark reporting
+        id: readiness
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -107,10 +111,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPOSITORY: ${{ github.repository }}
           RUN_ID: ${{ steps.dispatch.outputs.run_id }}
+          ORCHESTRATOR_RUN_ID: ${{ github.run_id }}
+          READINESS_OUTCOME: ${{ steps.readiness.outcome }}
         run: |
           set -euo pipefail
           gh run cancel "$RUN_ID" --repo "$REPOSITORY" || true
 
+          status=''
           for _ in $(seq 1 60); do
             status="$(gh api "repos/$REPOSITORY/actions/runs/$RUN_ID" --jq '.status')"
             [[ "$status" == completed ]] && break
@@ -125,5 +132,10 @@ jobs:
               | ($steps["Finalize"] // "not-run")
               end
           ' <<< "$jobs_json")"
-          printf 'Downstream run %s cancelled; Finalize=%s.\n' "$RUN_ID" "$cleanup_state"
+          conclusion="$(gh api "repos/$REPOSITORY/actions/runs/$RUN_ID" --jq '.conclusion // "unknown"')"
+          gh issue comment 24 --repo "$REPOSITORY" --body "Smoke finished: orchestrator https://github.com/$REPOSITORY/actions/runs/$ORCHESTRATOR_RUN_ID; downstream https://github.com/$REPOSITORY/actions/runs/$RUN_ID; readiness=$READINESS_OUTCOME; downstream_status=$status; downstream_conclusion=$conclusion; Finalize=$cleanup_state"
+          printf 'Downstream run %s cancelled; readiness=%s; Finalize=%s.\n' \
+            "$RUN_ID" "$READINESS_OUTCOME" "$cleanup_state"
+          [[ "$READINESS_OUTCOME" == success ]]
+          [[ "$status" == completed ]]
           [[ "$cleanup_state" == success ]]
