@@ -39,7 +39,7 @@ jobs:
           REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
-          started_epoch="$(date -u +%s)"
+          started_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
           gh workflow run private-runner-session.yml \
             --repo "$REPOSITORY" \
             --ref main \
@@ -52,23 +52,9 @@ jobs:
           for _ in $(seq 1 30); do
             runs_json="$(gh api \
               "repos/$REPOSITORY/actions/workflows/private-runner-session.yml/runs?event=workflow_dispatch&branch=main&per_page=20")"
-            run_id="$(python3 - "$started_epoch" <<'PY' <<< "$runs_json"
-import datetime
-import json
-import sys
-
-started = int(sys.argv[1])
-data = json.load(sys.stdin)
-matching = []
-for run in data.get("workflow_runs", []):
-    created = datetime.datetime.fromisoformat(run["created_at"].replace("Z", "+00:00"))
-    if int(created.timestamp()) >= started:
-        matching.append(run)
-if matching:
-    matching.sort(key=lambda item: item["created_at"])
-    print(matching[-1]["id"])
-PY
-)"
+            run_id="$(jq -r --arg started "$started_at" \
+              '[.workflow_runs[] | select(.created_at >= $started)] | sort_by(.created_at) | last | .id // empty' \
+              <<< "$runs_json")"
             [[ -n "$run_id" ]] && break
             sleep 2
           done
@@ -87,28 +73,18 @@ PY
           set -euo pipefail
           for _ in $(seq 1 180); do
             jobs_json="$(gh api "repos/$REPOSITORY/actions/runs/$RUN_ID/jobs?filter=latest&per_page=100")"
-            state="$(python3 <<'PY' <<< "$jobs_json"
-import json
-import sys
-
-data = json.load(sys.stdin)
-session = next((job for job in data.get("jobs", []) if job.get("name") == "Session"), None)
-if session is None:
-    print("pending")
-    raise SystemExit
-steps = {step.get("name"): step.get("conclusion") for step in session.get("steps", [])}
-ready = (
-    steps.get("Verify public T3 Code") == "success"
-    and steps.get("Report optional services online") == "success"
-)
-if ready:
-    print("ready")
-elif session.get("status") == "completed":
-    print("failed")
-else:
-    print("pending")
-PY
-)"
+            state="$(jq -r '
+              (.jobs | map(select(.name == "Session")) | first // null) as $session
+              | if $session == null then "pending"
+                else (($session.steps // []) | map({key: .name, value: .conclusion}) | from_entries) as $steps
+                | if $steps["Verify public T3 Code"] == "success"
+                     and $steps["Report optional services online"] == "success"
+                  then "ready"
+                  elif $session.status == "completed" then "failed"
+                  else "pending"
+                  end
+                end
+            ' <<< "$jobs_json")"
             case "$state" in
               ready)
                 printf 'T3 Code and the Lark reporting step are ready.\n'
@@ -142,21 +118,12 @@ PY
           done
 
           jobs_json="$(gh api "repos/$REPOSITORY/actions/runs/$RUN_ID/jobs?filter=latest&per_page=100")"
-          cleanup_state="$(python3 <<'PY' <<< "$jobs_json"
-import json
-import sys
-
-data = json.load(sys.stdin)
-session = next((job for job in data.get("jobs", []) if job.get("name") == "Session"), None)
-if session is None:
-    print("missing")
-    raise SystemExit
-steps = {step.get("name"): step.get("conclusion") for step in session.get("steps", [])}
-if steps.get("Finalize") == "success":
-    print("success")
-else:
-    print(steps.get("Finalize") or "not-run")
-PY
-)"
+          cleanup_state="$(jq -r '
+            (.jobs | map(select(.name == "Session")) | first // null) as $session
+            | if $session == null then "missing"
+              else (($session.steps // []) | map({key: .name, value: .conclusion}) | from_entries) as $steps
+              | ($steps["Finalize"] // "not-run")
+              end
+          ' <<< "$jobs_json")"
           printf 'Downstream run %s cancelled; Finalize=%s.\n' "$RUN_ID" "$cleanup_state"
           [[ "$cleanup_state" == success ]]
