@@ -133,9 +133,12 @@ jobs:
               end
           ' <<< "$jobs_json")"
           conclusion="$(gh api "repos/$REPOSITORY/actions/runs/$RUN_ID" --jq '.conclusion // "unknown"')"
-          gh issue comment 24 --repo "$REPOSITORY" --body "Smoke finished: orchestrator https://github.com/$REPOSITORY/actions/runs/$ORCHESTRATOR_RUN_ID; downstream https://github.com/$REPOSITORY/actions/runs/$RUN_ID; readiness=$READINESS_OUTCOME; downstream_status=$status; downstream_conclusion=$conclusion; Finalize=$cleanup_state"
-          printf 'Downstream run %s cancelled; readiness=%s; Finalize=%s.\n' \
-            "$RUN_ID" "$READINESS_OUTCOME" "$cleanup_state"
+          failure_code="$(gh run view "$RUN_ID" --repo "$REPOSITORY" --log-failed 2>/dev/null \
+            | grep -oE 'E(51|61)' | tail -n 1 || true)"
+          failure_code="${failure_code:-none}"
+          gh issue comment 24 --repo "$REPOSITORY" --body "Smoke finished: orchestrator https://github.com/$REPOSITORY/actions/runs/$ORCHESTRATOR_RUN_ID; downstream https://github.com/$REPOSITORY/actions/runs/$RUN_ID; readiness=$READINESS_OUTCOME; downstream_status=$status; downstream_conclusion=$conclusion; failure_code=$failure_code; Finalize=$cleanup_state"
+          printf 'Downstream run %s cancelled; readiness=%s; failure_code=%s; Finalize=%s.\n' \
+            "$RUN_ID" "$READINESS_OUTCOME" "$failure_code" "$cleanup_state"
           [[ "$READINESS_OUTCOME" == success ]]
           [[ "$status" == completed ]]
           [[ "$cleanup_state" == success ]]
