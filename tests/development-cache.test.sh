@@ -34,7 +34,7 @@ for path in \
   '~/.local/bin/uv' \
   '~/.local/bin/uvx' \
   '~/.local/bin/mise'; do
-  [[ "$(grep -Fc "$path" "$WORKFLOW")" -eq 2 ]] || \
+  [[ "$(grep -Fxc "            $path" "$WORKFLOW")" -eq 2 ]] || \
     fail "cache path is not shared by restore and save: $path"
 done
 
