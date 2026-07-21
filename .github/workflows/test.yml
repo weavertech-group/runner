@@ -38,9 +38,9 @@ jobs:
         shell: bash
         run: bash tests/t3code-session.test.sh
 
-      - name: Test named tunnel
+      - name: Test Quick Tunnel
         shell: bash
-        run: bash tests/named-tunnel.test.sh
+        run: bash tests/quick-tunnel.test.sh
 
       - name: Test development cache
         shell: bash
