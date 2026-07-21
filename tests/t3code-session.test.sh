@@ -46,7 +46,10 @@ ln -s "$MOCK_NODE_ROOT/bin/node" "$MOCK_BIN/node"
 cat > "$MOCK_BIN/npm" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
-printf '%s\n' "${npm_config_nodedir-}" > "${NPM_ENV_FILE:?}"
+{
+  printf 'nodedir=%s\n' "${npm_config_nodedir-}"
+  printf 'python=%s\n' "${npm_config_python-}"
+} > "${NPM_ENV_FILE:?}"
 printf '%s\n' "$@" > "${NPM_ARGS_FILE:?}"
 exit 0
 MOCK
@@ -99,8 +102,10 @@ NPM_ENV_FILE="$NPM_ENV_FILE" \
 NPM_ARGS_FILE="$NPM_ARGS_FILE" \
   bash "$INSTALL_SCRIPT"
 
-[[ "$(<"$NPM_ENV_FILE")" == "$MOCK_NODE_ROOT" ]] || \
+grep -Fxq "nodedir=$MOCK_NODE_ROOT" "$NPM_ENV_FILE" || \
   fail 'T3 installer did not use the active local Node header root'
+grep -Fxq 'python=/usr/bin/python3' "$NPM_ENV_FILE" || \
+  fail 'T3 installer did not use the stable system Python'
 grep -Fxq 'install' "$NPM_ARGS_FILE" || fail 'T3 npm install command is missing'
 grep -Fxq 't3@0.0.28' "$NPM_ARGS_FILE" || fail 'T3 package pin changed'
 
