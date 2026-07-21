@@ -7,6 +7,7 @@ PRESET="$ROOT_DIR/.github/workflows/repo-01-t3code-session.yml"
 SMOKE="$ROOT_DIR/.github/workflows/repo-01-t3code-smoke.yml"
 MARKER="$ROOT_DIR/.github/repo-01-t3code-smoke.pending"
 PRIVATE_WORKFLOW="$ROOT_DIR/.github/workflows/private-runner-session.yml"
+CLOUDFLARED_INSTALLER="$ROOT_DIR/scripts/install-cloudflared.sh"
 ALLOWLIST="$ROOT_DIR/.github/target-repositories.txt"
 
 fail() {
@@ -14,7 +15,7 @@ fail() {
   exit 1
 }
 
-for path in "$PRESET" "$SMOKE" "$MARKER" "$PRIVATE_WORKFLOW"; do
+for path in "$PRESET" "$SMOKE" "$MARKER" "$PRIVATE_WORKFLOW" "$CLOUDFLARED_INSTALLER"; do
   [[ -f "$path" ]] || fail "required preset file is missing: $path"
 done
 
@@ -71,12 +72,24 @@ grep -Fq -- '--raw-field enable_t3code=true' "$SMOKE" || fail 'smoke must enable
 grep -Fq 'Verify public T3 Code' "$SMOKE" || fail 'smoke does not wait for public T3 readiness'
 grep -Fq 'Report optional services online' "$SMOKE" || fail 'smoke does not wait for Lark reporting'
 grep -Fq 'gh issue comment 24' "$SMOKE" || fail 'smoke does not report status to issue 24'
+grep -Fq "grep -oE 'E(51|61)'" "$SMOKE" || fail 'smoke does not report the stable tool failure code'
 grep -Fq 'gh run cancel "$RUN_ID"' "$SMOKE" || fail 'smoke does not cancel the session'
 grep -Fq '$steps["Finalize"]' "$SMOKE" || fail 'smoke does not verify final cleanup'
 
 if grep -Eq 'HEADSCALE_AUTHKEY|TARGET_REPO_AUTH|LARK_WEBHOOK_(URL|SECRET)' "$SMOKE"; then
   fail 'smoke workflow must not handle downstream credentials directly'
 fi
+
+grep -Fq -- '--connect-timeout 15' "$CLOUDFLARED_INSTALLER" || \
+  fail 'cloudflared download lacks a connection timeout'
+grep -Fq -- '--max-time 180' "$CLOUDFLARED_INSTALLER" || \
+  fail 'cloudflared download lacks a total timeout'
+grep -Fq -- '--retry 8' "$CLOUDFLARED_INSTALLER" || \
+  fail 'cloudflared download retry count is too low'
+grep -Fq -- '--retry-all-errors' "$CLOUDFLARED_INSTALLER" || \
+  fail 'cloudflared download does not retry all transient errors'
+grep -Fq 'sha256sum --check --status' "$CLOUDFLARED_INSTALLER" || \
+  fail 'cloudflared checksum verification was removed'
 
 grep -Eq '^repo-01[[:space:]]+session--repo-01$' "$ALLOWLIST" || \
   fail 'repo-01 is not mapped to its target Environment'
