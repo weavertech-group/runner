@@ -9,8 +9,11 @@ START_SCRIPT="$ROOT_DIR/scripts/start-t3code.sh"
 CLEANUP_SCRIPT="$ROOT_DIR/scripts/cleanup.sh"
 TEMP_ROOT="$(mktemp -d)"
 MOCK_BIN="$TEMP_ROOT/bin"
+MOCK_NODE_ROOT="$TEMP_ROOT/node"
 MOCK_HOME="$TEMP_ROOT/home"
 MOCK_RUNNER_TEMP="$TEMP_ROOT/runner-temp"
+NPM_ENV_FILE="$TEMP_ROOT/npm-env"
+NPM_ARGS_FILE="$TEMP_ROOT/npm-args"
 PUBLIC_URL='https://mock-t3.trycloudflare.com'
 PAIRING_TOKEN='pairing-token-123'
 
@@ -26,14 +29,25 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$MOCK_BIN" "$MOCK_HOME" \
-  "$MOCK_RUNNER_TEMP/private-runner-diagnostics"
+mkdir -p "$MOCK_BIN" "$MOCK_NODE_ROOT/bin" "$MOCK_NODE_ROOT/include/node" \
+  "$MOCK_HOME" "$MOCK_RUNNER_TEMP/private-runner-diagnostics"
+printf 'mock node header\n' > "$MOCK_NODE_ROOT/include/node/node.h"
+printf '{}\n' > "$MOCK_NODE_ROOT/include/node/common.gypi"
 printf '%s\n' "$PUBLIC_URL" \
   > "$MOCK_RUNNER_TEMP/private-runner-diagnostics/t3code-public-url"
 chmod 0600 "$MOCK_RUNNER_TEMP/private-runner-diagnostics/t3code-public-url"
 
+cat > "$MOCK_NODE_ROOT/bin/node" <<'MOCK'
+#!/usr/bin/env bash
+exit 0
+MOCK
+ln -s "$MOCK_NODE_ROOT/bin/node" "$MOCK_BIN/node"
+
 cat > "$MOCK_BIN/npm" <<'MOCK'
 #!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "${npm_config_nodedir-}" > "${NPM_ENV_FILE:?}"
+printf '%s\n' "$@" > "${NPM_ARGS_FILE:?}"
 exit 0
 MOCK
 
@@ -70,7 +84,7 @@ fi
 exit 1
 MOCK
 
-chmod 0755 "$MOCK_BIN"/*
+chmod 0755 "$MOCK_BIN"/* "$MOCK_NODE_ROOT/bin/node"
 
 PATH="$MOCK_BIN:$PATH" \
 HOME="$MOCK_HOME" \
@@ -81,7 +95,14 @@ TARGET_REPO='owner/repository' \
 PATH="$MOCK_BIN:$PATH" \
 HOME="$MOCK_HOME" \
 RUNNER_TEMP="$MOCK_RUNNER_TEMP" \
+NPM_ENV_FILE="$NPM_ENV_FILE" \
+NPM_ARGS_FILE="$NPM_ARGS_FILE" \
   bash "$INSTALL_SCRIPT"
+
+[[ "$(<"$NPM_ENV_FILE")" == "$MOCK_NODE_ROOT" ]] || \
+  fail 'T3 installer did not use the active local Node header root'
+grep -Fxq 'install' "$NPM_ARGS_FILE" || fail 'T3 npm install command is missing'
+grep -Fxq 't3@0.0.28' "$NPM_ARGS_FILE" || fail 'T3 package pin changed'
 
 stdout_file="$TEMP_ROOT/stdout"
 stderr_file="$TEMP_ROOT/stderr"
