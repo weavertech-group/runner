@@ -345,13 +345,66 @@ jobs:
         shell: bash
         run: bash scripts/start-t3code.sh
 
-      - name: Verify public optional services
-        if: ${{ inputs.enable_devspace || inputs.enable_t3code }}
+      - name: Verify public DevSpace
+        id: verify-devspace-public
+        if: ${{ inputs.enable_devspace }}
+        continue-on-error: true
+        shell: bash
+        env:
+          ENABLE_DEVSPACE: true
+          ENABLE_T3CODE: false
+        run: bash scripts/verify-public-services.sh
+
+      - name: Verify public T3 Code
+        id: verify-t3code-public
+        if: ${{ inputs.enable_t3code }}
+        continue-on-error: true
+        shell: bash
+        env:
+          ENABLE_DEVSPACE: false
+          ENABLE_T3CODE: true
+        run: bash scripts/verify-public-services.sh
+
+      - name: Report optional services online
+        if: ${{ always() && (inputs.enable_devspace || inputs.enable_t3code) }}
+        continue-on-error: true
+        shell: bash
+        env:
+          LARK_REPORTING_ENABLED: ${{ vars.LARK_REPORTING_ENABLED }}
+          LARK_WEBHOOK_INCLUDE_TEMPORARY_ACCESS: ${{ vars.LARK_WEBHOOK_INCLUDE_TEMPORARY_ACCESS }}
+          LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
+          LARK_WEBHOOK_SECRET: ${{ secrets.LARK_WEBHOOK_SECRET }}
+          SESSION_TARGET_ID: ${{ inputs.target_id }}
+          SESSION_SSH_ONLINE: ${{ inputs.enable_ssh && steps.connect.outcome == 'success' }}
+          ENABLE_DEVSPACE: ${{ inputs.enable_devspace }}
+          ENABLE_T3CODE: ${{ inputs.enable_t3code }}
+          DEVSPACE_PUBLIC_VERIFY: ${{ steps.verify-devspace-public.outcome }}
+          T3CODE_PUBLIC_VERIFY: ${{ steps.verify-t3code-public.outcome }}
+        run: |
+          if [[ "$ENABLE_DEVSPACE" == true && "$DEVSPACE_PUBLIC_VERIFY" == success ]]; then
+            SESSION_SERVICE=devspace bash scripts/report-session-event.sh service-online
+          fi
+          if [[ "$ENABLE_T3CODE" == true && "$T3CODE_PUBLIC_VERIFY" == success ]]; then
+            SESSION_SERVICE=t3code bash scripts/report-session-event.sh service-online
+          fi
+
+      - name: Validate public optional services
+        if: ${{ always() && (steps.verify-devspace-public.outcome != 'skipped' || steps.verify-t3code-public.outcome != 'skipped') }}
         shell: bash
         env:
           ENABLE_DEVSPACE: ${{ inputs.enable_devspace }}
           ENABLE_T3CODE: ${{ inputs.enable_t3code }}
-        run: bash scripts/verify-public-services.sh
+          DEVSPACE_PUBLIC_VERIFY: ${{ steps.verify-devspace-public.outcome }}
+          T3CODE_PUBLIC_VERIFY: ${{ steps.verify-t3code-public.outcome }}
+        run: |
+          if [[ "$ENABLE_DEVSPACE" == true && "$DEVSPACE_PUBLIC_VERIFY" != success ]]; then
+            printf 'E54\n' >&2
+            exit 54
+          fi
+          if [[ "$ENABLE_T3CODE" == true && "$T3CODE_PUBLIC_VERIFY" != success ]]; then
+            printf 'E63\n' >&2
+            exit 63
+          fi
 
       - name: Execute
         if: ${{ inputs.enable_ssh }}
