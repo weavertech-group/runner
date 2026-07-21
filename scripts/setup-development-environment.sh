@@ -12,6 +12,7 @@ log_file="$diagnostic_dir/development-environment.log"
 temporary_dir="$runner_temp/private-runner-development"
 local_bin="${HOME:?HOME is required}/.local/bin"
 mise_config="$HOME/.config/mise/config.toml"
+kubernetes_cache_dir="$HOME/.cache/private-runner/kubernetes"
 development_cache_hit="${DEVELOPMENT_CACHE_HIT:-false}"
 
 fail() {
@@ -60,16 +61,27 @@ mise_cache_ready() {
   done
 }
 
+browser_cache_ready() {
+  [[ "$development_cache_hit" == true ]] || return 1
+  find "$HOME/.cache/ms-playwright" -maxdepth 1 -type d \
+    \( -name 'chromium-*' -o -name 'chromium_headless_shell-*' -o -name 'chrome-*' \) \
+    -print -quit 2>/dev/null | grep -q .
+}
+
 install_kubernetes_plugins() {
-  local kubectx_archive="$temporary_dir/kubectx.tar.gz"
+  local kubectx_archive="$kubernetes_cache_dir/kubectx-${KUBECTX_VERSION}.tar.gz"
   local kubectx_dir="$temporary_dir/kubectx"
-  local neat_archive="$temporary_dir/kubectl-neat.tar.gz"
+  local neat_archive="$kubernetes_cache_dir/kubectl-neat-${KUBECTL_NEAT_VERSION}.tar.gz"
   local neat_dir="$temporary_dir/kubectl-neat"
 
-  curl --fail --silent --show-error --location --retry 3 \
-    --proto '=https' --tlsv1.2 \
-    --output "$kubectx_archive" \
-    "https://github.com/ahmetb/kubectx/archive/v${KUBECTX_VERSION}.tar.gz"
+  install -d -m 0700 "$kubernetes_cache_dir"
+
+  if [[ ! -f "$kubectx_archive" ]]; then
+    curl --fail --silent --show-error --location --retry 3 \
+      --proto '=https' --tlsv1.2 \
+      --output "$kubectx_archive" \
+      "https://github.com/ahmetb/kubectx/archive/v${KUBECTX_VERSION}.tar.gz"
+  fi
   printf '%s  %s\n' "$KUBECTX_SHA256" "$kubectx_archive" | \
     sha256sum --check --status
   mkdir -p "$kubectx_dir"
@@ -79,10 +91,12 @@ install_kubernetes_plugins() {
   sudo ln -sfn /usr/local/bin/kubectx /usr/local/bin/kubectl-ctx
   sudo ln -sfn /usr/local/bin/kubens /usr/local/bin/kubectl-ns
 
-  curl --fail --silent --show-error --location --retry 3 \
-    --proto '=https' --tlsv1.2 \
-    --output "$neat_archive" \
-    "https://github.com/itaysk/kubectl-neat/releases/download/v${KUBECTL_NEAT_VERSION}/kubectl-neat_linux_amd64.tar.gz"
+  if [[ ! -f "$neat_archive" ]]; then
+    curl --fail --silent --show-error --location --retry 3 \
+      --proto '=https' --tlsv1.2 \
+      --output "$neat_archive" \
+      "https://github.com/itaysk/kubectl-neat/releases/download/v${KUBECTL_NEAT_VERSION}/kubectl-neat_linux_amd64.tar.gz"
+  fi
   printf '%s  %s\n' "$KUBECTL_NEAT_SHA256" "$neat_archive" | \
     sha256sum --check --status
   mkdir -p "$neat_dir"
@@ -160,7 +174,11 @@ main() {
   sudo ln -sfn /usr/bin/fdfind /usr/local/bin/fd
   sudo ln -sfn /usr/bin/batcat /usr/local/bin/bat
 
-  install -d -m 0700 "$local_bin" "$temporary_dir" "$HOME/.config/mise"
+  install -d -m 0700 \
+    "$local_bin" \
+    "$temporary_dir" \
+    "$HOME/.config/mise" \
+    "$kubernetes_cache_dir"
   if [[ "$development_cache_hit" != true || ! -x "$local_bin/uv" || ! -x "$local_bin/uvx" ]]; then
     install_uv
   fi
@@ -197,7 +215,11 @@ EOF
 
   npm install --global --no-audit --no-fund \
     "@playwright/test@${PLAYWRIGHT_VERSION}"
-  playwright install --with-deps chromium
+  if browser_cache_ready; then
+    playwright install-deps chromium
+  else
+    playwright install --with-deps chromium
+  fi
 
   if [[ "$development_cache_hit" != true || ! -x "$HOME/go/bin/migrate" ]]; then
     CGO_ENABLED=1 mise exec "go@${GO_VERSION}" -- \
