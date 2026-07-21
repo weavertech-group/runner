@@ -18,12 +18,22 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Run tests
+      - name: Test session library
         shell: bash
-        run: |
-          set -euo pipefail
-          bash tests/session-lib.test.sh
-          bash tests/workflow-security.test.sh
-          bash tests/devspace-session.test.sh
-          bash tests/development-cache.test.sh
-          bash -n scripts/*.sh tests/*.sh
+        run: bash tests/session-lib.test.sh
+
+      - name: Test workflow security
+        shell: bash
+        run: bash tests/workflow-security.test.sh
+
+      - name: Test DevSpace session
+        shell: bash
+        run: bash tests/devspace-session.test.sh
+
+      - name: Test development cache
+        shell: bash
+        run: bash tests/development-cache.test.sh
+
+      - name: Check shell syntax
+        shell: bash
+        run: bash -n scripts/*.sh tests/*.sh
