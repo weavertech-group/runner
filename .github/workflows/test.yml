@@ -119,3 +119,41 @@ jobs:
         if: ${{ steps.t3-install.outcome == 'failure' }}
         shell: bash
         run: exit 1
+
+  t3-service-integration:
+    name: T3 tunnel and Lark integration
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Prepare Node runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.23.1
+
+      - name: Prepare native build tools
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            build-essential \
+            python3
+
+      - name: Start and verify T3 through a real Quick Tunnel and Lark Webhook
+        shell: bash
+        env:
+          LARK_REPORTING_ENABLED: ${{ vars.LARK_REPORTING_ENABLED }}
+          LARK_WEBHOOK_INCLUDE_TEMPORARY_ACCESS: ${{ vars.LARK_WEBHOOK_INCLUDE_TEMPORARY_ACCESS }}
+          LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
+          LARK_WEBHOOK_SECRET: ${{ secrets.LARK_WEBHOOK_SECRET }}
+        run: bash tests/t3code-service.integration.sh
+
+      - name: Cleanup real T3 integration state
+        if: ${{ always() }}
+        shell: bash
+        run: bash scripts/cleanup.sh
