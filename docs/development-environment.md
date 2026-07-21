@@ -1,6 +1,25 @@
 # Runner development environment
 
-Every valid runner session prepares a fixed Ubuntu 24.04 development environment before private network access is enabled. Installation output and version details stay in `$RUNNER_TEMP/private-runner-diagnostics`; public workflow output contains only stable status messages and error code `E55` on failure.
+Every valid runner session prepares an Ubuntu 24.04 development environment. Installation output and version details stay in `$RUNNER_TEMP/private-runner-diagnostics`; public workflow output contains only stable status messages and error codes.
+
+## Fast startup behavior
+
+When private SSH is enabled, the workflow restores available caches and connects the runner to Headscale before installing the complete development environment. This makes the runner reachable while the remaining tools are being prepared.
+
+After connecting, inspect the local setup state:
+
+```bash
+cat ~/private-runner-session/setup-status
+cat ~/private-runner-session/setup-details
+```
+
+The status is one of:
+
+- `installing`: the complete environment is still being prepared;
+- `ready`: all fixed tools, Codex CLI, and Claude Code were installed and verified;
+- `degraded`: one or more setup steps failed, but the SSH session remains available for manual repair.
+
+Repository credentials are also configured before complete development setup, so an authorized operator can clone the selected repository while installation continues.
 
 ## Base command-line tools
 
@@ -35,29 +54,40 @@ The pinned environment includes:
 - `golang-migrate` with PostgreSQL, MySQL, and SQLite support
 - Kubernetes plugins `kubectl ctx`, `kubectl ns`, and `kubectl neat`
 
-Codex CLI and Claude Code are the deliberate exceptions. The workflow installs `@openai/codex@latest` and `@anthropic-ai/claude-code@latest` so every new session receives their current npm releases. This makes those two tools non-reproducible by design and keeps npm availability on the critical startup path.
+Codex CLI and Claude Code are deliberate exceptions. Every session installs both tools in a single npm invocation using `@openai/codex@latest` and `@anthropic-ai/claude-code@latest`.
 
 Downloaded uv and Kubernetes plugin archives are verified against pinned SHA-256 checksums. mise is installed from a versioned immutable release, and GitHub artifact-attestation verification is explicitly enabled for tool backends that support it.
 
-## Cross-session cache
+## Cross-session caches
 
-The privileged workflow restores and saves a GitHub Actions cache for the slowest fixed development components:
+The privileged workflow restores two best-effort GitHub Actions caches.
+
+The fixed development cache contains:
 
 - mise-installed Python, Go, Rust, Terraform, and OpenTofu toolchains;
 - mise shims;
-- the Playwright Chromium browser cache;
+- Playwright Chromium;
 - the compiled `migrate` binary;
-- the pinned uv, uvx, and mise executables.
+- the pinned uv, uvx, and mise executables;
+- downloaded kubectx, kubens, and kubectl-neat archives.
 
-The cache key contains the operating system, architecture, and the hash of `scripts/development-versions.env`. Changing any pinned version automatically creates a fresh cache. Prefix restore keys are deliberately not used, so a session never restores a cache built for a different version manifest.
+Its key contains the operating system, architecture, and the hash of `scripts/development-versions.env`. A pinned version change therefore creates a fresh cache.
 
-On an exact cache hit, the installer reuses the restored toolchains and binaries. Ubuntu packages, Corepack, pnpm, Yarn, the Playwright CLI, Kubernetes plugins, Codex CLI, and Claude Code are still refreshed during every session. Playwright checks the restored browser cache and avoids downloading Chromium again when the required build is already present.
+The npm download cache contains `~/.npm` and Corepack's download directory. Its key contains the Node.js version and ISO week. Codex and Claude still query npm and install `latest`; the cache only reuses package downloads when possible.
 
-The cache is saved before the long-running `Execute` step. Restore and save steps are best effort: a cache service failure falls back to the normal installation path and does not prevent the private runner session from starting.
+On an exact fixed-cache hit, the installer skips downloading uv and mise, skips reinstalling complete mise toolchains, skips compiling `migrate`, and avoids downloading Playwright Chromium when the expected browser cache is present. Playwright system dependencies are still installed on the fresh Ubuntu VM.
+
+Both caches are saved immediately after their corresponding installation and verification steps, before optional DevSpace startup and the long-running session. Cache restore or save failures do not prevent the runner from starting.
+
+## Prewarm the cache
+
+After changing pinned versions, or before the first runner session, manually dispatch **Prepare Development Cache**. The workflow does not use Headscale, repository credentials, GitHub Environments, or DevSpace. It builds and verifies the complete environment, then exits after saving the fixed and npm caches.
+
+The first private session after a new cache key may still perform a cold installation when no prewarm run has been completed. Later sessions with the same fixed version manifest should restore the cache.
 
 ## Project dependencies
 
-The runner does not automatically execute dependency installation from a selected target repository. Commands such as `npm install`, package lifecycle scripts, Python build hooks, and Rust build scripts execute repository-controlled code. Automatically running them before the operator connects would expand the trusted workflow boundary.
+The runner does not automatically execute dependency installation from a selected target repository. Commands such as `npm install`, package lifecycle scripts, Python build hooks, and Rust build scripts execute repository-controlled code.
 
 After cloning and reviewing the selected repository, run:
 
@@ -85,14 +115,13 @@ Lockfiles are preferred when available. The helper uses frozen or immutable inst
 
 ## Verification
 
-Before network setup, `scripts/verify-development-environment.sh` checks command discovery, exact pinned versions, the embedded Go module version of `migrate`, Kubernetes plugin discovery, and the installed Playwright browser. It also persists Node-provided command paths under `$HOME/.local/bin` so they remain available in a fresh SSH login shell.
+The workflow first verifies fixed development tools without requiring Codex or Claude. After the combined AI CLI installation, it verifies the complete environment and persists Node-provided command paths under `$HOME/.local/bin` for fresh SSH login shells.
 
 For local static validation:
 
 ```bash
 bash tests/workflow-security.test.sh
 bash tests/development-cache.test.sh
+bash tests/startup-optimization.test.sh
 bash -n scripts/*.sh tests/*.sh
 ```
-
-A static test cannot prove that every upstream package download succeeds. Before merging a version update, dispatch the branch workflow in a protected test Environment and confirm that the installation and verification steps complete on GitHub's Ubuntu 24.04 image.

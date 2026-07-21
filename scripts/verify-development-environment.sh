@@ -10,6 +10,7 @@ runner_temp="${RUNNER_TEMP:?RUNNER_TEMP is required}"
 diagnostic_dir="$runner_temp/private-runner-diagnostics"
 log_file="$diagnostic_dir/development-environment-versions.log"
 local_bin="${HOME:?HOME is required}/.local/bin"
+verify_ai_tools="${VERIFY_AI_TOOLS:-true}"
 
 fail() {
   printf 'E55\n' >&2
@@ -29,8 +30,14 @@ require_version() {
 persist_node_commands() {
   local command_name=''
   local command_path=''
+  local commands=(node npm npx corepack pnpm yarn playwright)
+
+  if [[ "$verify_ai_tools" == true ]]; then
+    commands+=(codex claude)
+  fi
+
   install -d -m 0700 "$local_bin"
-  for command_name in node npm npx corepack pnpm yarn playwright codex claude; do
+  for command_name in "${commands[@]}"; do
     command_path="$(command -v "$command_name")"
     ln -sfn "$command_path" "$local_bin/$command_name"
   done
@@ -43,11 +50,16 @@ main() {
   grep -Fq 'VERSION_ID="24.04"' /etc/os-release
 
   local command_name=''
-  for command_name in \
-    bat cargo claude codex corepack direnv fd fzf go htop kubectx kubens lsof \
-    migrate mise node npm npx playwright pnpm python rg rustc socat terraform \
-    tmux tofu tree uv yarn kubectl kubectl-ctx kubectl-ns kubectl-neat \
-    runner-bootstrap; do
+  local commands=(
+    bat cargo corepack direnv fd fzf go htop kubectx kubens lsof
+    migrate mise node npm npx playwright pnpm python rg rustc socat terraform
+    tmux tofu tree uv yarn kubectl kubectl-ctx kubectl-ns kubectl-neat
+    runner-bootstrap
+  )
+  if [[ "$verify_ai_tools" == true ]]; then
+    commands+=(claude codex)
+  fi
+  for command_name in "${commands[@]}"; do
     require_command "$command_name"
   done
 
@@ -66,13 +78,16 @@ main() {
   go version -m "$(command -v migrate)" | \
     grep -Fq "github.com/golang-migrate/migrate/v4 v${MIGRATE_VERSION}"
 
-  codex --version
-  claude --version
   kubectl plugin list
 
   find "$HOME/.cache/ms-playwright" -maxdepth 1 -type d \
     \( -name 'chromium-*' -o -name 'chromium_headless_shell-*' -o -name 'chrome-*' \) \
     -print -quit | grep -q .
+
+  if [[ "$verify_ai_tools" == true ]]; then
+    codex --version
+    claude --version
+  fi
 
   {
     printf 'node='; node --version
@@ -88,8 +103,10 @@ main() {
     printf 'opentofu='; tofu version | head -n 1
     printf 'playwright='; playwright --version
     printf 'migrate='; migrate -version
-    printf 'codex='; codex --version
-    printf 'claude='; claude --version
+    if [[ "$verify_ai_tools" == true ]]; then
+      printf 'codex='; codex --version
+      printf 'claude='; claude --version
+    fi
   } > "$log_file"
   chmod 0600 "$log_file"
 }

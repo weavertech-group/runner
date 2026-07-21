@@ -1,0 +1,112 @@
+name: Prepare Development Cache
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prepare-development-cache
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+
+      - name: Prepare Node runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22.23.1
+
+      - name: Prepare cache keys
+        id: cache-keys
+        shell: bash
+        run: |
+          set -euo pipefail
+          # shellcheck source=scripts/development-versions.env
+          source scripts/development-versions.env
+          printf 'npm=%s\n' \
+            "npm-v1-${RUNNER_OS}-${RUNNER_ARCH}-node-${NODE_VERSION}-$(date -u +%G-W%V)" \
+            >> "$GITHUB_OUTPUT"
+
+      - name: Restore development environment cache
+        id: development-cache
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.local/share/mise/installs
+            ~/.local/share/mise/shims
+            ~/.cache/ms-playwright
+            ~/.cache/private-runner/kubernetes
+            ~/go/bin/migrate
+            ~/.local/bin/uv
+            ~/.local/bin/uvx
+            ~/.local/bin/mise
+          key: development-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/development-versions.env') }}
+
+      - name: Restore npm download cache
+        id: npm-cache
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.npm
+            ~/.cache/node/corepack
+          key: ${{ steps.cache-keys.outputs.npm }}
+
+      - name: Install development environment
+        env:
+          DEVELOPMENT_CACHE_HIT: ${{ steps.development-cache.outputs.cache-hit }}
+        shell: bash
+        run: bash scripts/setup-development-environment.sh
+
+      - name: Verify fixed development environment
+        env:
+          VERIFY_AI_TOOLS: false
+        shell: bash
+        run: bash scripts/verify-development-environment.sh
+
+      - name: Save development environment cache
+        if: ${{ steps.development-cache.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.local/share/mise/installs
+            ~/.local/share/mise/shims
+            ~/.cache/ms-playwright
+            ~/.cache/private-runner/kubernetes
+            ~/go/bin/migrate
+            ~/.local/bin/uv
+            ~/.local/bin/uvx
+            ~/.local/bin/mise
+          key: development-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/development-versions.env') }}
+
+      - name: Install AI coding CLIs
+        shell: bash
+        run: |
+          npm install --global --no-audit --no-fund \
+            @openai/codex@latest \
+            @anthropic-ai/claude-code@latest
+
+      - name: Verify complete development environment
+        shell: bash
+        run: bash scripts/verify-development-environment.sh
+
+      - name: Save npm download cache
+        if: ${{ steps.npm-cache.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.npm
+            ~/.cache/node/corepack
+          key: ${{ steps.cache-keys.outputs.npm }}

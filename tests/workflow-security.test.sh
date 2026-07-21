@@ -4,6 +4,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKFLOW="$ROOT_DIR/.github/workflows/private-runner-session.yml"
+PREPARE_CACHE_WORKFLOW="$ROOT_DIR/.github/workflows/prepare-development-cache.yml"
 CONNECT_SCRIPT="$ROOT_DIR/scripts/connect-headscale.sh"
 ALLOWLIST="$ROOT_DIR/.github/target-repositories.txt"
 CODEOWNERS="$ROOT_DIR/.github/CODEOWNERS"
@@ -25,27 +26,25 @@ require_file() {
   [[ -f "$1" ]] || fail "$2"
 }
 
-require_unconditional_step() {
+step_block() {
   local start="$1"
   local end="$2"
-  local message="$3"
-  local block=''
-  block="$(sed -n "/- name: $start/,/- name: $end/p" "$WORKFLOW")"
-  [[ -n "$block" ]] || fail "$message is missing"
-  if grep -Fq 'if:' <<< "$block"; then
-    fail "$message must run for every valid runner session"
-  fi
+  sed -n "/- name: $start/,/- name: $end/p" "$WORKFLOW"
 }
 
-require_file "$WORKFLOW" 'workflow is missing'
-require_file "$CODEOWNERS" 'CODEOWNERS is missing'
-require_file "$SECURITY_POLICY" 'security policy is missing'
-require_file "$CLOUDFLARED_SCRIPT" 'cloudflared installer is missing'
-require_file "$DEVSPACE_SCRIPT" 'DevSpace launcher is missing'
-require_file "$DEVELOPMENT_SETUP" 'development environment installer is missing'
-require_file "$DEVELOPMENT_VERIFY" 'development environment verifier is missing'
-require_file "$DEVELOPMENT_VERSIONS" 'development version manifest is missing'
-require_file "$PROJECT_BOOTSTRAP" 'project bootstrap command is missing'
+for entry in \
+  "$WORKFLOW:workflow is missing" \
+  "$PREPARE_CACHE_WORKFLOW:cache preparation workflow is missing" \
+  "$CODEOWNERS:CODEOWNERS is missing" \
+  "$SECURITY_POLICY:security policy is missing" \
+  "$CLOUDFLARED_SCRIPT:cloudflared installer is missing" \
+  "$DEVSPACE_SCRIPT:DevSpace launcher is missing" \
+  "$DEVELOPMENT_SETUP:development environment installer is missing" \
+  "$DEVELOPMENT_VERIFY:development environment verifier is missing" \
+  "$DEVELOPMENT_VERSIONS:development version manifest is missing" \
+  "$PROJECT_BOOTSTRAP:project bootstrap command is missing"; do
+  require_file "${entry%%:*}" "${entry#*:}"
+done
 
 grep -Fq 'workflow_dispatch:' "$WORKFLOW" || \
   fail 'privileged workflow must remain manually dispatched'
@@ -54,13 +53,21 @@ if grep -Eq '^[[:space:]]+(pull_request|pull_request_target|push|issue_comment|w
   fail 'privileged workflow must not gain an automatic or fork-driven trigger'
 fi
 
-if grep -Eq 'uses: [^@]+@(main|master|v[0-9]+([.]?[0-9]+)*)$' "$WORKFLOW"; then
-  fail 'third-party actions must be pinned to a full commit SHA'
+[[ "$(grep -Fc 'workflow_dispatch:' "$PREPARE_CACHE_WORKFLOW")" -eq 1 ]] || \
+  fail 'cache preparation workflow must remain manually dispatched'
+if grep -Eq '^[[:space:]]+(pull_request|pull_request_target|push|issue_comment|workflow_run|repository_dispatch|schedule):' \
+  "$PREPARE_CACHE_WORKFLOW"; then
+  fail 'cache preparation workflow must not gain an automatic trigger'
 fi
 
-if grep -Eq '(^|[[:space:]])(set -x|env|printenv)([[:space:]]|$)' "$WORKFLOW"; then
-  fail 'workflow contains a command that can expose secrets'
-fi
+for workflow in "$WORKFLOW" "$PREPARE_CACHE_WORKFLOW"; do
+  if grep -Eq 'uses: [^@]+@(main|master|v[0-9]+([.]?[0-9]+)*)$' "$workflow"; then
+    fail "third-party actions must be pinned to a full commit SHA: $workflow"
+  fi
+  if grep -Eq '(^|[[:space:]])(set -x|env|printenv)([[:space:]]|$)' "$workflow"; then
+    fail "workflow contains a command that can expose secrets: $workflow"
+  fi
+done
 
 grep -Fq 'TARGET_REPO_AUTH: ${{ secrets.TARGET_REPO_AUTH }}' "$WORKFLOW" || \
   fail 'selected repository credential is not scoped explicitly'
@@ -70,7 +77,6 @@ grep -Fq 'TARGET_REPO: ${{ secrets.TARGET_REPO }}' "$WORKFLOW" || \
   fail 'real repository identity must come from the selected Environment'
 grep -Fq 'HEADSCALE_URL: ${{ secrets.HEADSCALE_URL }}' "$WORKFLOW" || \
   fail 'Headscale URL must be masked as sensitive metadata'
-
 if grep -Fq 'HEADSCALE_MAGIC_DNS_DOMAIN' "$WORKFLOW"; then
   fail 'runner workflow must not depend on a MagicDNS domain secret'
 fi
@@ -104,7 +110,6 @@ grep -Fq 'AddressFamily inet6' "$CONNECT_SCRIPT" || \
 if grep -Fq 'tailnet_ipv4' "$CONNECT_SCRIPT"; then
   fail 'fallback SSH must not depend on conflicting CGNAT routes'
 fi
-
 grep -Fq '/health' "$CONNECT_SCRIPT" || \
   fail 'Headscale health must be checked before classifying registration errors'
 grep -Fq 'sudo install -d -m 0755 /var/run/tailscale' "$CONNECT_SCRIPT" || \
@@ -113,7 +118,6 @@ if grep -Eq 'tailscaled([[:space:]\\]|$)' "$CONNECT_SCRIPT" && \
    grep -Eq '&[[:space:]]+then' "$CONNECT_SCRIPT"; then
   fail 'background daemon startup must not use an asynchronous if condition'
 fi
-
 grep -Fq 'tailscale status --json' "$CONNECT_SCRIPT" || \
   fail 'daemon readiness must work before the node is logged in'
 grep -Fq -- '--accept-dns=false' "$CONNECT_SCRIPT" || \
@@ -128,30 +132,42 @@ if grep -Fq 'runs-on: ubuntu-latest' "$WORKFLOW"; then
   fail 'runner image must use the explicit Ubuntu 24.04 label'
 fi
 [[ "$(grep -Fc 'runs-on: ubuntu-24.04' "$WORKFLOW")" -eq 2 ]] || \
-  fail 'both jobs must use Ubuntu 24.04'
+  fail 'both privileged workflow jobs must use Ubuntu 24.04'
+grep -Fq 'runs-on: ubuntu-24.04' "$PREPARE_CACHE_WORKFLOW" || \
+  fail 'cache preparation must use Ubuntu 24.04'
 grep -Fq 'actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020' "$WORKFLOW" || \
   fail 'session Node runtime action is not pinned'
 grep -Fq 'node-version: 22.23.1' "$WORKFLOW" || \
   fail 'session Node runtime version is not fixed'
+
+prepare_network_line="$(grep -n -- '- name: Prepare network' "$WORKFLOW" | cut -d: -f1)"
+connect_line="$(grep -n -- '- name: Connect' "$WORKFLOW" | cut -d: -f1)"
+install_line="$(grep -n -- '- name: Install development environment' "$WORKFLOW" | cut -d: -f1)"
+[[ "$prepare_network_line" -lt "$install_line" && "$connect_line" -lt "$install_line" ]] || \
+  fail 'private SSH must be available before full development setup'
+
 grep -Fq 'run: bash scripts/setup-development-environment.sh' "$WORKFLOW" || \
   fail 'development environment is not installed for runner sessions'
-grep -Fq 'run: npm install -g @openai/codex@latest' "$WORKFLOW" || \
+ai_block="$(step_block 'Install AI coding CLIs' 'Verify complete development environment')"
+grep -Fq '@openai/codex@latest' <<< "$ai_block" || \
   fail 'Codex CLI must explicitly track npm latest'
-grep -Fq 'run: npm install -g @anthropic-ai/claude-code@latest' "$WORKFLOW" || \
+grep -Fq '@anthropic-ai/claude-code@latest' <<< "$ai_block" || \
   fail 'Claude Code must explicitly track npm latest'
+[[ "$(grep -Fc 'npm install' <<< "$ai_block")" -eq 1 ]] || \
+  fail 'Codex and Claude must share one npm install invocation'
+grep -Fq 'VERIFY_AI_TOOLS: false' "$WORKFLOW" || \
+  fail 'fixed development tools are not verified independently'
 grep -Fq 'run: bash scripts/verify-development-environment.sh' "$WORKFLOW" || \
-  fail 'development environment is not verified before network setup'
+  fail 'development environment is not verified'
 
-require_unconditional_step 'Prepare Node runtime' 'Install development environment' \
-  'Node runtime preparation'
-require_unconditional_step 'Install development environment' 'Install Codex CLI' \
-  'development environment installation'
-require_unconditional_step 'Install Codex CLI' 'Install Claude Code' \
-  'Codex CLI installation'
-require_unconditional_step 'Install Claude Code' 'Verify development environment' \
-  'Claude Code installation'
-require_unconditional_step 'Verify development environment' 'Prepare network' \
-  'development environment verification'
+grep -Fq 'continue-on-error: true' <<< "$(step_block 'Install development environment' 'Verify fixed development environment')" || \
+  fail 'development installation failure must leave SSH available for repair'
+grep -Fq 'continue-on-error: true' <<< "$ai_block" || \
+  fail 'AI installation failure must leave SSH available for repair'
+grep -Fq 'private-runner-session/setup-status' "$WORKFLOW" || \
+  fail 'development setup status is not exposed locally'
+grep -Fq 'status=degraded' "$WORKFLOW" || \
+  fail 'degraded development setup state is not supported'
 
 # shellcheck source=../scripts/development-versions.env
 source "$DEVELOPMENT_VERSIONS"
@@ -178,7 +194,6 @@ for package in bat direnv fd-find fzf htop lsof ripgrep socat tmux tree; do
   grep -Eq "^[[:space:]]+${package}([[:space:]]*\\\\)?$" "$DEVELOPMENT_SETUP" || \
     fail "$package is missing from the base development tools"
 done
-
 grep -Fq '/usr/bin/fdfind /usr/local/bin/fd' "$DEVELOPMENT_SETUP" || \
   fail 'fd compatibility command is missing'
 grep -Fq '/usr/bin/batcat /usr/local/bin/bat' "$DEVELOPMENT_SETUP" || \
@@ -212,7 +227,9 @@ grep -Fq 'opentofu = "${OPENTOFU_VERSION}"' "$DEVELOPMENT_SETUP" || \
 grep -Fq '@playwright/test@${PLAYWRIGHT_VERSION}' "$DEVELOPMENT_SETUP" || \
   fail 'Playwright version is not applied'
 grep -Fq 'playwright install --with-deps chromium' "$DEVELOPMENT_SETUP" || \
-  fail 'Playwright Chromium is not installed'
+  fail 'Playwright cold-cache browser installation is missing'
+grep -Fq 'playwright install-deps chromium' "$DEVELOPMENT_SETUP" || \
+  fail 'Playwright cached-browser dependency installation is missing'
 grep -Fq 'golang-migrate/migrate/v4/cmd/migrate@v${MIGRATE_VERSION}' "$DEVELOPMENT_SETUP" || \
   fail 'database migration CLI is not installed at a pinned version'
 [[ "$(grep -Fc 'sha256sum --check --status' "$DEVELOPMENT_SETUP")" -ge 3 ]] || \
@@ -238,6 +255,8 @@ grep -Fq 'codex --version' "$DEVELOPMENT_VERIFY" || \
   fail 'Codex installation is not verified'
 grep -Fq 'claude --version' "$DEVELOPMENT_VERIFY" || \
   fail 'Claude installation is not verified'
+grep -Fq 'VERIFY_AI_TOOLS' "$DEVELOPMENT_VERIFY" || \
+  fail 'development verifier cannot separate fixed and AI tools'
 grep -Fq 'persist_node_commands' "$DEVELOPMENT_VERIFY" || \
   fail 'Node-installed commands are not persisted for SSH sessions'
 grep -Fq 'go version -m' "$DEVELOPMENT_VERIFY" || \
