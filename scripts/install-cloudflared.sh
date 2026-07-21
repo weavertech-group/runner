@@ -25,8 +25,16 @@ chmod 0600 "$log_file" || fail
 [[ "$(uname -s)" == 'Linux' && "$(uname -m)" == 'x86_64' ]] || fail
 
 rm -f "$temporary"
-if ! curl --fail --silent --show-error --location --retry 3 \
-  --proto '=https' --tlsv1.2 --output "$temporary" "$url" \
+if ! curl --fail --silent --show-error --location \
+  --connect-timeout 15 \
+  --max-time 180 \
+  --retry 8 \
+  --retry-delay 2 \
+  --retry-all-errors \
+  --proto '=https' \
+  --tlsv1.2 \
+  --output "$temporary" \
+  "$url" \
   2>> "$log_file"; then
   fail
 fi
