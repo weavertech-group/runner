@@ -85,9 +85,12 @@ jobs:
       - name: Install AI coding CLIs
         shell: bash
         run: |
-          npm install --global --no-audit --no-fund \
-            @openai/codex@latest \
-            @anthropic-ai/claude-code@latest
+          curl -fsSL https://chatgpt.com/codex/install.sh | sh
+          curl -fsSL https://claude.ai/install.sh | bash
+          export PATH="$HOME/.local/bin:$PATH"
+          printf '%s\n' "$HOME/.local/bin" >> "$GITHUB_PATH"
+          codex --version
+          claude --version
 
       - name: Save npm download cache
         if: ${{ steps.npm-cache.outputs.cache-hit != 'true' }}

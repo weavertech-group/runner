@@ -2,7 +2,7 @@
 
 Set `target_id`, `enable_ssh=true`, and `enable_devspace=true` when dispatching
 **Private Runner Session**. The workflow clones the selected target repository,
-installs DevSpace, starts it on `127.0.0.1:7676`, and exposes it through a new
+runs `npx @waishnav/devspace@latest`, starts it on `127.0.0.1:7676`, and exposes it through a new
 Cloudflare Quick Tunnel.
 
 Read the connection details through the private tailnet:

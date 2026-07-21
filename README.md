@@ -11,8 +11,7 @@ target repository once, start DevSpace MCP and/or T3 Code, and expose each
 service through its own temporary Cloudflare Quick Tunnel. It does not run issue
 agents, create pull requests, or implement a task queue.
 
-For repeatable setup, operation, validation, credential rotation, cleanup, and
-troubleshooting, use the privacy-safe
+For repeatable setup and operation, use the
 [operations runbook](docs/runner-operations-runbook.md). Optional public services
 are documented in the [DevSpace session guide](docs/devspace-session.md) and
 [T3 Code session guide](docs/t3code-session.md). This README describes the design
@@ -28,9 +27,9 @@ invariants.
 - Independent workflow sessions, including concurrent sessions for one target.
 - A path-scoped Git credential store for the selected repository only.
 - One shared target working tree for SSH, DevSpace, T3 Code, Codex, and Claude.
-- Optional pinned DevSpace `1.0.4`.
-- Optional pinned T3 Code `0.0.28`, bound to `127.0.0.1:3773`.
-- cloudflared `2026.7.2` for temporary Quick Tunnels.
+- Optional current DevSpace via `npx`.
+- Optional current T3 Code via `npx`, bound to `127.0.0.1:3773`.
+- Current cloudflared binary for temporary Quick Tunnels.
 - One anonymous Quick Tunnel process and random HTTPS URL per enabled service.
 - Connection URLs and credentials stored only in mode-`0600` local files.
 - Native command output in the Actions log; no custom error-code layer.

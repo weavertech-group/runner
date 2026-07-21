@@ -146,7 +146,12 @@ jobs:
           DEVELOPMENT_CACHE_HIT: ${{ steps.development-cache.outputs.cache-hit }}
         run: |
           bash scripts/setup-development-environment.sh
-          npm install --global --no-audit --no-fund @openai/codex@latest @anthropic-ai/claude-code@latest
+          curl -fsSL https://chatgpt.com/codex/install.sh | sh
+          curl -fsSL https://claude.ai/install.sh | bash
+          export PATH="$HOME/.local/bin:$PATH"
+          printf '%s\n' "$HOME/.local/bin" >> "$GITHUB_PATH"
+          codex --version
+          claude --version
 
       - name: Report development environment ready
         env:
@@ -179,10 +184,9 @@ jobs:
           ENABLE_T3CODE: ${{ inputs.enable_t3code }}
         run: |
           install -d "$RUNNER_TEMP/private-runner-tools"
-          curl -fsSL -o "$RUNNER_TEMP/private-runner-tools/cloudflared" https://github.com/cloudflare/cloudflared/releases/download/2026.7.2/cloudflared-linux-amd64
+          curl -fsSL -o "$RUNNER_TEMP/private-runner-tools/cloudflared" https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
           chmod +x "$RUNNER_TEMP/private-runner-tools/cloudflared"
-          if [[ "$ENABLE_DEVSPACE" == true ]]; then npm install --global --no-audit --no-fund @waishnav/devspace@1.0.4; fi
-          if [[ "$ENABLE_T3CODE" == true ]]; then npm install --global --no-audit --no-fund t3@0.0.28; fi
+          "$RUNNER_TEMP/private-runner-tools/cloudflared" --version
 
       - name: Clone target repository
         if: ${{ (inputs.enable_devspace || inputs.enable_t3code) && inputs.enable_ssh && inputs.target_id != '' }}
@@ -213,7 +217,7 @@ jobs:
           owner_token="$(openssl rand -hex 32)"
           connection_dir="$HOME/private-runner-session/devspace"
           install -d -m 0700 "$connection_dir"
-          HOST=127.0.0.1 PORT=7676 DEVSPACE_CONFIG_DIR="$RUNNER_TEMP/devspace-config" DEVSPACE_ALLOWED_ROOTS="$RUNNER_TEMP/target-workspace" DEVSPACE_PUBLIC_BASE_URL="$DEVSPACE_PUBLIC_URL" DEVSPACE_OAUTH_OWNER_TOKEN="$owner_token" DEVSPACE_STATE_DIR="$RUNNER_TEMP/devspace-state" DEVSPACE_WORKTREE_ROOT="$RUNNER_TEMP/devspace-worktrees" DEVSPACE_TOOL_MODE=full DEVSPACE_WIDGETS=changes DEVSPACE_SUBAGENTS=0 DEVSPACE_LOG_SHELL_COMMANDS=0 devspace serve > "$RUNNER_TEMP/devspace.log" 2>&1 &
+          HOST=127.0.0.1 PORT=7676 DEVSPACE_ALLOWED_ROOTS="$RUNNER_TEMP/target-workspace" DEVSPACE_PUBLIC_BASE_URL="$DEVSPACE_PUBLIC_URL" DEVSPACE_OAUTH_OWNER_TOKEN="$owner_token" DEVSPACE_TOOL_MODE=full DEVSPACE_WIDGETS=changes DEVSPACE_SUBAGENTS=0 DEVSPACE_LOG_SHELL_COMMANDS=0 npx --yes @waishnav/devspace@latest serve > "$RUNNER_TEMP/devspace.log" 2>&1 &
           printf '%s\n' "$DEVSPACE_PUBLIC_URL/mcp" > "$connection_dir/mcp-url"
           printf '%s\n' "$owner_token" > "$connection_dir/owner-token"
           printf 'MCP_URL=%s/mcp\nOWNER_TOKEN=%s\n' "$DEVSPACE_PUBLIC_URL" "$owner_token" > "$connection_dir/connection.txt"
@@ -222,16 +226,14 @@ jobs:
       - name: Start T3 Code
         if: ${{ inputs.enable_t3code && inputs.enable_ssh && inputs.target_id != '' }}
         run: |
-          t3_home="$RUNNER_TEMP/t3code-home"
           connection_dir="$HOME/private-runner-session/t3code"
-          install -d -m 0700 "$t3_home" "$connection_dir"
-          t3 project add --base-dir "$t3_home" "$RUNNER_TEMP/target-workspace"
-          T3CODE_HOME="$t3_home" t3 serve --base-dir "$t3_home" --host 127.0.0.1 --port 3773 "$RUNNER_TEMP/target-workspace" > "$RUNNER_TEMP/t3code.log" 2>&1 &
+          install -d -m 0700 "$connection_dir"
+          npx --yes t3@latest serve --host 127.0.0.1 --port 3773 "$RUNNER_TEMP/target-workspace" > "$RUNNER_TEMP/t3code.log" 2>&1 &
           sleep 3
-          pairing_token="$(sed -n 's/^Token: //p' "$RUNNER_TEMP/t3code.log" | head -n1)"
+          pairing_url="$(grep -m1 '^Pairing URL: ' "$RUNNER_TEMP/t3code.log" | sed 's/^Pairing URL: //')"
           printf '%s\n' "$T3CODE_PUBLIC_URL" > "$connection_dir/t3-url"
-          printf '%s/pair#token=%s\n' "$T3CODE_PUBLIC_URL" "$pairing_token" > "$connection_dir/pairing-url"
-          printf 'T3_URL=%s\nPAIRING_URL=%s/pair#token=%s\n' "$T3CODE_PUBLIC_URL" "$T3CODE_PUBLIC_URL" "$pairing_token" > "$connection_dir/connection.txt"
+          printf '%s\n' "$pairing_url" > "$connection_dir/pairing-url"
+          printf 'T3_URL=%s\nPAIRING_URL=%s\n' "$T3CODE_PUBLIC_URL" "$pairing_url" > "$connection_dir/connection.txt"
           chmod 600 "$connection_dir/t3-url" "$connection_dir/pairing-url" "$connection_dir/connection.txt"
 
       - name: Keep session alive
