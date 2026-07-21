@@ -1,32 +1,26 @@
-name: Private Runner Session
+name: Private T3 Session
 
 on:
   workflow_dispatch:
     inputs:
       target_id:
-        description: Optional public opaque target identifier
+        description: Target repository identifier
+        required: true
         type: string
       enable_ssh:
-        description: Enable private SSH access
-        default: true
-        type: boolean
-      enable_devspace:
-        description: Start DevSpace MCP for the selected target repository
-        default: false
-        type: boolean
-      enable_t3code:
-        description: Start T3 Code for the selected target repository
+        description: Enable Headscale/Tailscale access
         default: false
         type: boolean
       non_durable:
-        description: Finalize immediately after setup instead of keeping the session alive
+        description: Finish after printing the T3 link
         default: false
         type: boolean
       ssh_public_key:
-        description: Optional fallback Ed25519 public key
+        description: Optional OpenSSH public key; if omitted and SSH is enabled, use Tailscale SSH
+        required: false
         type: string
 
-run-name: Private runner session
+run-name: Private T3 session
 
 permissions:
   contents: read
@@ -41,8 +35,9 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       environment_name: ${{ steps.resolve.outputs.environment_name }}
+
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
 
@@ -50,52 +45,70 @@ jobs:
         env:
           TARGET_ID: ${{ inputs.target_id }}
         run: |
-          if [[ -z "$TARGET_ID" ]]; then
-            environment_name=session--none
-          else
-            environment_name="$(awk -v id="$TARGET_ID" '$1 == id { print $2 }' .github/target-repositories.txt)"
-            [[ -n "$environment_name" ]]
-          fi
+          set -euo pipefail
+
+          environment_name="$(awk -v id="$TARGET_ID" '$1 == id { print $2 }' .github/target-repositories.txt)"
+          [[ -n "$environment_name" ]]
+
           printf 'environment_name=%s\n' "$environment_name" >> "$GITHUB_OUTPUT"
 
-  runner:
+  session:
     name: Session
     needs: resolve-target
     runs-on: ubuntu-24.04
     environment:
       name: ${{ needs.resolve-target.outputs.environment_name }}
-      deployment: false
+
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@v4
         with:
           node-version: 22.23.1
 
-      - name: Report session starting
-        env:
-          LARK_REPORTING_ENABLED: ${{ vars.LARK_REPORTING_ENABLED }}
-          LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
-          LARK_WEBHOOK_SECRET: ${{ secrets.LARK_WEBHOOK_SECRET }}
-          SESSION_TARGET_ID: ${{ inputs.target_id }}
-        run: bash scripts/report-session-event.sh starting
+      - name: Define paths
+        run: |
+          set -euo pipefail
 
-      - name: Restore development environment cache
-        id: development-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.local/share/mise/installs
-            ~/.local/share/mise/shims
-            ~/.cache/ms-playwright
-            ~/.cache/private-runner/kubernetes
-            ~/go/bin/migrate
-            ~/.local/bin/uv
-            ~/.local/bin/uvx
-            ~/.local/bin/mise
-          key: development-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/development-versions.env') }}
+          {
+            echo "WORKSPACE=$RUNNER_TEMP/workspace"
+            echo "SESSION_DIR=$HOME/private-runner-session"
+          } >> "$GITHUB_ENV"
+
+      - name: Install development tools
+        run: |
+          set -euo pipefail
+
+          if [[ -x scripts/setup-development-environment.sh ]]; then
+            bash scripts/setup-development-environment.sh
+          fi
+
+          curl -fsSL https://chatgpt.com/codex/install.sh | sh
+          curl -fsSL https://claude.ai/install.sh | bash
+
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.local/bin:$PATH"
+
+          codex --version
+          claude --version
+
+      - name: Start OpenSSH
+        if: ${{ inputs.enable_ssh && inputs.ssh_public_key != '' }}
+        env:
+          SSH_PUBLIC_KEY: ${{ inputs.ssh_public_key }}
+        run: |
+          set -euo pipefail
+
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq openssh-server
+
+          install -d -m 0700 "$HOME/.ssh"
+          printf '%s\n' "$SSH_PUBLIC_KEY" >> "$HOME/.ssh/authorized_keys"
+          chmod 600 "$HOME/.ssh/authorized_keys"
+
+          sudo systemctl enable --now ssh
 
       - name: Join Headscale
         if: ${{ inputs.enable_ssh }}
@@ -104,147 +117,140 @@ jobs:
           HEADSCALE_AUTHKEY: ${{ secrets.HEADSCALE_AUTHKEY }}
           SSH_PUBLIC_KEY: ${{ inputs.ssh_public_key }}
         run: |
+          set -euo pipefail
+
           curl -fsSL https://tailscale.com/install.sh | sh
-          if [[ -n "$SSH_PUBLIC_KEY" ]]; then
-            sudo apt-get update -qq
-            sudo apt-get install -y -qq openssh-server
-            sudo systemctl enable --now ssh
-            install -d -m 0700 "$HOME/.ssh"
-            printf '%s\n' "$SSH_PUBLIC_KEY" >> "$HOME/.ssh/authorized_keys"
-            chmod 600 "$HOME/.ssh/authorized_keys"
-            sudo tailscale up --login-server="$HEADSCALE_URL" --auth-key="$HEADSCALE_AUTHKEY" --hostname="gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" --accept-dns=false
-            tailnet_ipv6="$(sudo tailscale status --json | jq -r '[.Self.TailscaleIPs[] | select(contains(":"))][0]')"
-            printf 'AddressFamily inet6\nListenAddress %s\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin no\nAllowUsers runner\n' "$tailnet_ipv6" | sudo tee /etc/ssh/sshd_config.d/99-private-runner.conf >/dev/null
-            sudo systemctl restart ssh
-          else
-            sudo tailscale up --login-server="$HEADSCALE_URL" --auth-key="$HEADSCALE_AUTHKEY" --hostname="gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" --accept-dns=false --ssh
-          fi
 
-      - name: Report SSH online
-        if: ${{ inputs.enable_ssh }}
-        env:
-          LARK_REPORTING_ENABLED: ${{ vars.LARK_REPORTING_ENABLED }}
-          LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
-          LARK_WEBHOOK_SECRET: ${{ secrets.LARK_WEBHOOK_SECRET }}
-          SESSION_TARGET_ID: ${{ inputs.target_id }}
-          SESSION_SSH_ONLINE: true
-          SESSION_RUNNER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}
-        run: bash scripts/report-session-event.sh ssh-online
+          ts_args=(
+            --login-server="$HEADSCALE_URL"
+            --auth-key="$HEADSCALE_AUTHKEY"
+            --hostname="gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+            --accept-dns=false
+          )
 
-      - name: Configure target repository access
-        if: ${{ inputs.target_id != '' }}
+          [[ -n "$SSH_PUBLIC_KEY" ]] || ts_args+=(--ssh)
+
+          sudo tailscale up "${ts_args[@]}"
+
+      - name: Configure repository access
         env:
           TARGET_REPO: ${{ secrets.TARGET_REPO }}
           TARGET_REPO_AUTH: ${{ secrets.TARGET_REPO_AUTH }}
         run: |
+          set -euo pipefail
+
           git config --global credential.https://github.com.useHttpPath true
           git config --global credential.helper "store --file=$RUNNER_TEMP/target-repo-credential"
-          printf 'protocol=https\nhost=github.com\npath=%s.git\nusername=x-access-token\npassword=%s\n\n' "$TARGET_REPO" "$TARGET_REPO_AUTH" | git credential approve
 
-      - name: Install development environment
-        env:
-          DEVELOPMENT_CACHE_HIT: ${{ steps.development-cache.outputs.cache-hit }}
-        run: |
-          bash scripts/setup-development-environment.sh
-          curl -fsSL https://chatgpt.com/codex/install.sh | sh
-          curl -fsSL https://claude.ai/install.sh | bash
-          export PATH="$HOME/.local/bin:$PATH"
-          printf '%s\n' "$HOME/.local/bin" >> "$GITHUB_PATH"
-          codex --version
-          claude --version
+          printf 'protocol=https\nhost=github.com\npath=%s.git\nusername=x-access-token\npassword=%s\n\n' \
+            "$TARGET_REPO" \
+            "$TARGET_REPO_AUTH" \
+            | git credential approve
 
-      - name: Report development environment ready
-        env:
-          LARK_REPORTING_ENABLED: ${{ vars.LARK_REPORTING_ENABLED }}
-          LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
-          LARK_WEBHOOK_SECRET: ${{ secrets.LARK_WEBHOOK_SECRET }}
-          SESSION_TARGET_ID: ${{ inputs.target_id }}
-          SESSION_SSH_ONLINE: ${{ inputs.enable_ssh }}
-        run: bash scripts/report-session-event.sh setup-ready
-
-      - name: Save development environment cache
-        if: ${{ steps.development-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            ~/.local/share/mise/installs
-            ~/.local/share/mise/shims
-            ~/.cache/ms-playwright
-            ~/.cache/private-runner/kubernetes
-            ~/go/bin/migrate
-            ~/.local/bin/uv
-            ~/.local/bin/uvx
-            ~/.local/bin/mise
-          key: development-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/development-versions.env') }}
-
-      - name: Install optional tools
-        if: ${{ (inputs.enable_devspace || inputs.enable_t3code) && inputs.enable_ssh && inputs.target_id != '' }}
-        env:
-          ENABLE_DEVSPACE: ${{ inputs.enable_devspace }}
-          ENABLE_T3CODE: ${{ inputs.enable_t3code }}
-        run: |
-          install -d "$RUNNER_TEMP/private-runner-tools"
-          curl -fsSL -o "$RUNNER_TEMP/private-runner-tools/cloudflared" https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
-          chmod +x "$RUNNER_TEMP/private-runner-tools/cloudflared"
-          "$RUNNER_TEMP/private-runner-tools/cloudflared" --version
-
-      - name: Clone target repository
-        if: ${{ (inputs.enable_devspace || inputs.enable_t3code) && inputs.enable_ssh && inputs.target_id != '' }}
+      - name: Clone repository
         env:
           TARGET_REPO: ${{ secrets.TARGET_REPO }}
-        run: git clone "https://github.com/${TARGET_REPO}.git" "$RUNNER_TEMP/target-workspace"
-
-      - name: Start Quick Tunnels
-        if: ${{ (inputs.enable_devspace || inputs.enable_t3code) && inputs.enable_ssh && inputs.target_id != '' }}
-        env:
-          ENABLE_DEVSPACE: ${{ inputs.enable_devspace }}
-          ENABLE_T3CODE: ${{ inputs.enable_t3code }}
         run: |
-          cloudflared="$RUNNER_TEMP/private-runner-tools/cloudflared"
-          if [[ "$ENABLE_DEVSPACE" == true ]]; then
-            "$cloudflared" tunnel --url http://127.0.0.1:7676 > "$RUNNER_TEMP/devspace-tunnel.log" 2>&1 &
-          fi
-          if [[ "$ENABLE_T3CODE" == true ]]; then
-            "$cloudflared" tunnel --url http://127.0.0.1:3773 > "$RUNNER_TEMP/t3code-tunnel.log" 2>&1 &
-          fi
-          sleep 5
-          if [[ "$ENABLE_DEVSPACE" == true ]]; then echo "DEVSPACE_PUBLIC_URL=$(grep -oE 'https://[-a-z0-9]+[.]trycloudflare[.]com' "$RUNNER_TEMP/devspace-tunnel.log" | head -n1)" >> "$GITHUB_ENV"; fi
-          if [[ "$ENABLE_T3CODE" == true ]]; then echo "T3CODE_PUBLIC_URL=$(grep -oE 'https://[-a-z0-9]+[.]trycloudflare[.]com' "$RUNNER_TEMP/t3code-tunnel.log" | head -n1)" >> "$GITHUB_ENV"; fi
+          set -euo pipefail
 
-      - name: Start DevSpace
-        if: ${{ inputs.enable_devspace && inputs.enable_ssh && inputs.target_id != '' }}
+          git clone "https://github.com/${TARGET_REPO}.git" "$WORKSPACE"
+
+      - name: Install cloudflared
         run: |
-          owner_token="$(openssl rand -hex 32)"
-          connection_dir="$HOME/private-runner-session/devspace"
-          install -d -m 0700 "$connection_dir"
-          HOST=127.0.0.1 PORT=7676 DEVSPACE_ALLOWED_ROOTS="$RUNNER_TEMP/target-workspace" DEVSPACE_PUBLIC_BASE_URL="$DEVSPACE_PUBLIC_URL" DEVSPACE_OAUTH_OWNER_TOKEN="$owner_token" DEVSPACE_TOOL_MODE=full DEVSPACE_WIDGETS=changes DEVSPACE_SUBAGENTS=0 DEVSPACE_LOG_SHELL_COMMANDS=0 npx --yes @waishnav/devspace@latest serve > "$RUNNER_TEMP/devspace.log" 2>&1 &
-          printf '%s\n' "$DEVSPACE_PUBLIC_URL/mcp" > "$connection_dir/mcp-url"
-          printf '%s\n' "$owner_token" > "$connection_dir/owner-token"
-          printf 'MCP_URL=%s/mcp\nOWNER_TOKEN=%s\n' "$DEVSPACE_PUBLIC_URL" "$owner_token" > "$connection_dir/connection.txt"
-          chmod 600 "$connection_dir/mcp-url" "$connection_dir/owner-token" "$connection_dir/connection.txt"
+          set -euo pipefail
+
+          sudo curl -fsSL \
+            -o /usr/local/bin/cloudflared \
+            https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+
+          sudo chmod +x /usr/local/bin/cloudflared
+          cloudflared --version
 
       - name: Start T3 Code
-        if: ${{ inputs.enable_t3code && inputs.enable_ssh && inputs.target_id != '' }}
-        run: |
-          connection_dir="$HOME/private-runner-session/t3code"
-          install -d -m 0700 "$connection_dir"
-          npx --yes t3@latest serve --host 127.0.0.1 --port 3773 "$RUNNER_TEMP/target-workspace" > "$RUNNER_TEMP/t3code.log" 2>&1 &
-          sleep 3
-          pairing_url="$(grep -m1 '^Pairing URL: ' "$RUNNER_TEMP/t3code.log" | sed 's/^Pairing URL: //')"
-          printf '%s\n' "$T3CODE_PUBLIC_URL" > "$connection_dir/t3-url"
-          printf '%s\n' "$pairing_url" > "$connection_dir/pairing-url"
-          printf 'T3_URL=%s\nPAIRING_URL=%s\n' "$T3CODE_PUBLIC_URL" "$pairing_url" > "$connection_dir/connection.txt"
-          chmod 600 "$connection_dir/t3-url" "$connection_dir/pairing-url" "$connection_dir/connection.txt"
-
-      - name: Keep session alive
-        if: ${{ inputs.enable_ssh && ! inputs.non_durable }}
-        run: sleep infinity
-
-      - name: Report session offline
-        if: ${{ always() }}
         env:
-          LARK_REPORTING_ENABLED: ${{ vars.LARK_REPORTING_ENABLED }}
-          LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
-          LARK_WEBHOOK_SECRET: ${{ secrets.LARK_WEBHOOK_SECRET }}
-          SESSION_TARGET_ID: ${{ inputs.target_id }}
-        run: bash scripts/report-session-event.sh offline
+          NON_DURABLE: ${{ inputs.non_durable }}
+        run: |
+          set -euo pipefail
+
+          install -d -m 0700 "$SESSION_DIR/t3code"
+
+          t3_log="$RUNNER_TEMP/t3code.log"
+          tunnel_log="$RUNNER_TEMP/cloudflared.log"
+
+          npx --yes t3@latest serve \
+            --host 127.0.0.1 \
+            --port 3773 \
+            "$WORKSPACE" \
+            > "$t3_log" 2>&1 &
+
+          t3_pid="$!"
+
+          cloudflared tunnel --url http://127.0.0.1:3773 \
+            > "$tunnel_log" 2>&1 &
+
+          tunnel_pid="$!"
+
+          t3_token=""
+          t3_backend_url=""
+
+          for _ in {1..30}; do
+            t3_backend_url="$(sed -nE 's#.*(https://[-a-z0-9]+[.]trycloudflare[.]com).*#\1#p' "$tunnel_log" | head -n1)"
+            t3_token="$(sed -nE 's/^.*Token:[[:space:]]*([^[:space:]]+).*$/\1/p' "$t3_log" | head -n1)"
+
+            if [[ -n "$t3_backend_url" && -n "$t3_token" ]]; then
+              break
+            fi
+
+            if ! kill -0 "$t3_pid" 2>/dev/null; then
+              echo "T3 Code exited before producing pairing information." >&2
+              cat "$t3_log" >&2
+              exit 1
+            fi
+
+            if ! kill -0 "$tunnel_pid" 2>/dev/null; then
+              echo "cloudflared exited before producing a tunnel URL." >&2
+              cat "$tunnel_log" >&2
+              exit 1
+            fi
+
+            sleep 1
+          done
+
+          if [[ -z "$t3_backend_url" || -z "$t3_token" ]]; then
+            echo "Failed to create T3 pairing link." >&2
+            echo
+            echo "cloudflared log:" >&2
+            cat "$tunnel_log" >&2
+            echo
+            echo "T3 log:" >&2
+            cat "$t3_log" >&2
+            exit 1
+          fi
+
+          t3_link="https://app.t3.codes/pair?host=${t3_backend_url}#token=${t3_token}"
+
+          printf '%s\n' "$t3_backend_url" > "$SESSION_DIR/t3code/backend-url"
+          printf '%s\n' "$t3_token" > "$SESSION_DIR/t3code/token"
+          printf '%s\n' "$t3_link" > "$SESSION_DIR/t3code/link"
+          chmod 600 "$SESSION_DIR/t3code/backend-url" "$SESSION_DIR/t3code/token" "$SESSION_DIR/t3code/link"
+
+          {
+            echo "### T3 Code"
+            echo
+            echo "[Open T3 Code]($t3_link)"
+            echo
+            echo '```text'
+            echo "$t3_link"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "T3 Code link:"
+          echo "$t3_link"
+
+          if [[ "$NON_DURABLE" != "true" ]]; then
+            sleep infinity
+          fi
+
+      - name: Keep SSH session alive
+        if: ${{ inputs.enable_ssh && ! inputs.non_durable && failure() }}
+        run: sleep infinity
