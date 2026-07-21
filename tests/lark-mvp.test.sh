@@ -70,12 +70,14 @@ export LARK_WEBHOOK_SECRET=test-signing-secret
 export LARK_WEBHOOK_INCLUDE_TEMPORARY_ACCESS=true
 
 printf 'ready\n' > "$HOME/private-runner-session/setup-status"
+printf 'development_install=success\n' > "$HOME/private-runner-session/setup-details"
 printf 'https://dev-mvp.trycloudflare.com/mcp\n' > "$HOME/private-runner-session/devspace/mcp-url"
 printf '%064d\n' 0 | tr '0' 'b' > "$HOME/private-runner-session/devspace/owner-token"
 printf 'https://t3-mvp.trycloudflare.com\n' > "$HOME/private-runner-session/t3code/t3-url"
 printf 'https://t3-mvp.trycloudflare.com/pair#token=mvp_pairing-token.1\n' > \
   "$HOME/private-runner-session/t3code/pairing-url"
 chmod 0600 "$HOME/private-runner-session/setup-status" \
+  "$HOME/private-runner-session/setup-details" \
   "$HOME/private-runner-session/devspace/mcp-url" \
   "$HOME/private-runner-session/devspace/owner-token" \
   "$HOME/private-runner-session/t3code/t3-url" \
@@ -86,11 +88,25 @@ export LARK_REPORTING_ENABLED=false
 bash "$REPORTER" starting >/dev/null 2>&1 || fail 'disabled reporting failed caller'
 [[ "$(request_count)" -eq 0 ]] || fail 'disabled reporting made a request'
 [[ ! -e "$HOME/private-runner-session/lark-events" ]] || fail 'disabled reporting created markers'
+[[ ! -e "$HOME/private-runner-session/lark-session-active" ]] || fail 'disabled reporting activated a session'
 
-# A successful event is marked and routine retries do not resend it.
+# always() status steps after a preflight failure must not create synthetic Lark
+# lifecycle messages. Only the workflow's starting event activates reporting.
 export LARK_REPORTING_ENABLED=true
+bash "$REPORTER" setup-degraded >/dev/null 2>&1 || fail 'preflight degraded gate failed caller'
+bash "$REPORTER" offline >/dev/null 2>&1 || fail 'preflight offline gate failed caller'
+[[ "$(request_count)" -eq 0 ]] || fail 'preflight failure emitted a false lifecycle message'
+[[ ! -e "$HOME/private-runner-session/lark-events" ]] || fail 'preflight failure created delivery markers'
+[[ ! -e "$HOME/private-runner-session/lark-session-expiry" ]] || fail 'preflight failure created expiry state'
+
+# A successful starting invocation activates the session, is marked delivered,
+# and routine retries do not resend it.
 bash "$REPORTER" starting >/dev/null 2>&1 || fail 'starting event failed caller'
 [[ "$(request_count)" -eq 1 ]] || fail 'starting event was not sent once'
+active_marker="$HOME/private-runner-session/lark-session-active"
+[[ -f "$active_marker" && "$(<"$active_marker")" == active ]] || \
+  fail 'starting event did not activate Lark lifecycle reporting'
+[[ "$(stat -c '%a' "$active_marker")" == 600 ]] || fail 'active marker is not private'
 marker_dir="$HOME/private-runner-session/lark-events"
 starting_marker="$marker_dir/webhook-starting"
 [[ -f "$starting_marker" && "$(<"$starting_marker")" == delivered ]] || \
@@ -175,11 +191,14 @@ fi
 bash "$REPORTER" offline >/dev/null 2>&1
 [[ "$(request_count)" -eq 7 ]] || fail 'offline event was duplicated'
 
-# Cleanup removes all local connection and delivery state.
+# Cleanup removes all local connection, setup, activation, and delivery state.
 printf 'response\n' > "$RUNNER_TEMP/lark-webhook-response.leftover"
 bash "$CLEANUP" >/dev/null 2>&1 || fail 'cleanup failed'
 [[ ! -e "$marker_dir" ]] || fail 'cleanup did not remove Lark markers'
 [[ ! -e "$HOME/private-runner-session/lark-session-expiry" ]] || fail 'cleanup did not remove expiry'
+[[ ! -e "$active_marker" ]] || fail 'cleanup did not remove active marker'
+[[ ! -e "$HOME/private-runner-session/setup-status" ]] || fail 'cleanup did not remove setup status'
+[[ ! -e "$HOME/private-runner-session/setup-details" ]] || fail 'cleanup did not remove setup details'
 [[ ! -e "$HOME/private-runner-session/devspace" ]] || fail 'cleanup did not remove DevSpace connection data'
 [[ ! -e "$HOME/private-runner-session/t3code" ]] || fail 'cleanup did not remove T3 connection data'
 [[ ! -e "$RUNNER_TEMP/lark-webhook-response.leftover" ]] || fail 'cleanup did not remove response temp files'
