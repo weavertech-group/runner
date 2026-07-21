@@ -4,8 +4,6 @@ set -euo pipefail
 
 enable_devspace="${ENABLE_DEVSPACE-false}"
 enable_t3code="${ENABLE_T3CODE-false}"
-devspace_public_url="${DEVSPACE_PUBLIC_URL-}"
-t3_public_url="${T3_PUBLIC_URL-}"
 runner_temp="${RUNNER_TEMP:?RUNNER_TEMP is required}"
 diagnostic_dir="$runner_temp/private-runner-diagnostics"
 verify_log="$diagnostic_dir/public-services.log"
@@ -16,12 +14,13 @@ fail() {
   exit "$code"
 }
 
-normalize_https_origin() {
-  local value="$1"
-  if [[ ! "$value" =~ ^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/?$ ]]; then
-    return 1
-  fi
-  printf '%s\n' "${value%/}"
+read_quick_tunnel_url() {
+  local file="$1"
+  local value=''
+  [[ -r "$file" ]] || return 1
+  value="$(<"$file")"
+  [[ "$value" =~ ^https://[-a-z0-9]+[.]trycloudflare[.]com$ ]] || return 1
+  printf '%s\n' "$value"
 }
 
 wait_for_http() {
@@ -64,12 +63,12 @@ install -d -m 0700 "$diagnostic_dir" || fail 51
 chmod 0600 "$verify_log" || fail 51
 
 if [[ "$enable_devspace" == true ]]; then
-  devspace_public_url="$(normalize_https_origin "$devspace_public_url")" || fail 54
+  devspace_public_url="$(read_quick_tunnel_url "$diagnostic_dir/devspace-public-url")" || fail 54
   wait_for_http "$devspace_public_url/.well-known/oauth-protected-resource/mcp" || fail 54
 fi
 
 if [[ "$enable_t3code" == true ]]; then
-  t3_public_url="$(normalize_https_origin "$t3_public_url")" || fail 63
+  t3_public_url="$(read_quick_tunnel_url "$diagnostic_dir/t3code-public-url")" || fail 63
   wait_for_http "$t3_public_url/" || fail 63
   verify_websocket "$t3_public_url/" || fail 63
 fi

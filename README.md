@@ -7,10 +7,9 @@ one GitHub Environment without exposing the private repository name.
 
 By default, the workflow is only a secure network/SSH handoff. Explicit
 `enable_devspace` and `enable_t3code` options can additionally clone the selected
-target repository once, start DevSpace MCP and/or T3 Code, and expose those
-services through a pre-created Cloudflare Named Tunnel with stable HTTPS
-hostnames. It does not run issue agents, create pull requests, or implement a
-task queue.
+target repository once, start DevSpace MCP and/or T3 Code, and expose each
+service through its own temporary Cloudflare Quick Tunnel. It does not run issue
+agents, create pull requests, or implement a task queue.
 
 For repeatable setup, operation, validation, credential rotation, cleanup, and
 troubleshooting, use the privacy-safe
@@ -26,18 +25,17 @@ invariants.
 - Headscale URL override and Tailscale SSH without changing runner DNS.
 - Optional Ed25519 public-key mode using system OpenSSH on the tailnet only.
 - Public opaque-ID allowlist and one GitHub Environment per target repository.
-- At most one active workflow session for each opaque target.
+- Independent workflow sessions, including concurrent sessions for one target.
 - A path-scoped Git credential store for the selected repository only.
 - One shared target working tree for SSH, DevSpace, T3 Code, Codex, and Claude.
 - Optional pinned DevSpace `1.0.4`.
 - Optional pinned T3 Code `0.0.28`, bound to `127.0.0.1:3773`.
 - Pinned cloudflared `2026.7.2` Linux binary with an embedded SHA-256 check.
-- Target-specific Named Tunnel tokens passed through mode-`0600` files.
-- Separate fixed HTTPS hostnames for T3 Code and DevSpace.
+- One anonymous Quick Tunnel process and random HTTPS URL per enabled service.
 - Public HTTP readiness checks and a T3 WebSocket upgrade check.
 - Connection URLs and credentials stored only in mode-`0600` local files.
 - Minimal public output; detailed local diagnostics are never uploaded.
-- Best-effort service termination, credential removal, logout, and ephemeral-node
+- Best-effort service termination, state removal, logout, and ephemeral-node
   cleanup when a job is cancelled.
 
 ## Required administrator setup
@@ -119,7 +117,7 @@ the same automatic log masking as other Actions secrets.
 | --- | --- | --- |
 | Secret | `HEADSCALE_URL` | The externally reachable HTTPS control URL |
 
-Do not create repository-level target, Headscale auth, or Cloudflare credentials.
+Do not create repository-level target or Headscale authentication credentials.
 Create a GitHub Environment named `session--none` containing only Environment
 secret `HEADSCALE_AUTHKEY`. The workflow uses this Environment when no target is
 selected.
@@ -128,7 +126,7 @@ For each allowed repository:
 
 1. Allocate a public opaque ID such as `repo-07`.
 2. Create an Environment such as `session--repo-07`.
-3. Add the required Environment secrets:
+3. Add these Environment secrets:
 
    | Secret | Value |
    | --- | --- |
@@ -136,33 +134,20 @@ For each allowed repository:
    | `TARGET_REPO` | The real private `owner/repository` name |
    | `TARGET_REPO_AUTH` | A token limited to that repository |
 
-4. To enable DevSpace or T3 Code, pre-create one remotely-managed Cloudflare
-   Named Tunnel for this target. Add separate published application hostnames:
-
-   ```text
-   t3-repo-07.example.com  -> http://127.0.0.1:3773
-   mcp-repo-07.example.com -> http://127.0.0.1:7676
-   ```
-
-5. Add the applicable Environment secrets:
-
-   | Secret | Required when | Value |
-   | --- | --- | --- |
-   | `CLOUDFLARE_TUNNEL_TOKEN` | Either public service is enabled | Token for this target-specific Tunnel |
-   | `T3_PUBLIC_URL` | T3 Code is enabled | Root HTTPS URL, such as `https://t3-repo-07.example.com` |
-   | `DEVSPACE_PUBLIC_URL` | DevSpace is enabled | Root HTTPS URL, such as `https://mcp-repo-07.example.com` |
-
-6. Add only the opaque mapping to
+4. Add only the opaque mapping to
    [.github/target-repositories.txt](.github/target-repositories.txt):
 
    ```text
    repo-07 session--repo-07
    ```
 
-Do not reuse one Tunnel token or hostname between opaque targets. Do not put a
-real private repository name in the public allowlist, Environment name, workflow
-input, run name, or step name. The resolver rejects opaque IDs not in the
-allowlist before the credential-bearing job starts.
+Cloudflare account credentials, DNS records, custom hostnames, and persistent
+connector resources are not required. Quick Tunnel URLs are allocated
+anonymously by `cloudflared` during each workflow run.
+
+Never put a real private repository name in the public allowlist, Environment
+name, workflow input, run name, or step name. The resolver rejects opaque IDs
+not in the allowlist before the credential-bearing job starts.
 
 For every session Environment, restrict deployment branches to the protected
 default branch, enable required reviewers where appropriate, and disable admin
@@ -231,6 +216,7 @@ git clone https://github.com/<owner>/<repository>.git
 To start an optional service, select a non-empty `target_id`, keep `enable_ssh`
 enabled, and set `enable_devspace`, `enable_t3code`, or both to `true`. The
 workflow clones the target once and shares the working tree between services.
+When both services are enabled, each receives a separate random Quick Tunnel URL.
 
 Read private connection details over SSH:
 
@@ -239,9 +225,9 @@ cat ~/private-runner-session/devspace/connection.txt
 cat ~/private-runner-session/t3code/connection.txt
 ```
 
-The Cloudflare hostname remains stable across runs. DevSpace Owner Tokens and T3
-pairing/session credentials are ephemeral and change each run. The fixed
-hostname has no healthy origin after the workflow ends.
+The URLs change on every workflow run and stop working when that runner session
+ends. Old client entries must be updated with the newly generated URL or pairing
+link.
 
 Supplying `ssh_public_key` switches the session to system OpenSSH. Only
 `ssh-ed25519` and `sk-ssh-ed25519@openssh.com` single-line keys are accepted;
@@ -254,7 +240,7 @@ The session step waits indefinitely and the job timeout is 360 minutes, so the
 runner stays online until GitHub enforces its six-hour hosted-job limit. Setup
 time is part of that limit. Ending or cancelling the workflow destroys the
 GitHub-hosted runner and its local connection files; when finalization runs, it
-also stops T3 Code, DevSpace, and cloudflared, removes temporary credentials and
+also stops T3 Code, DevSpace, and all Quick Tunnel processes, removes temporary
 state, deletes Git credentials, and attempts an immediate Headscale logout.
 
 ## Error codes
@@ -275,7 +261,7 @@ Only stable error codes are printed publicly:
 | `E40` | job reaches its configured timeout | GitHub Actions conclusion |
 | `E41` | run is cancelled | GitHub Actions conclusion |
 | `E50` | optional public service requested without a target or private SSH | runner |
-| `E51` | cloudflared download, token/configuration, or connector startup failure | runner |
+| `E51` | cloudflared download, Quick Tunnel startup, or URL discovery failure | runner |
 | `E52` | DevSpace installation, startup, or local readiness failure | runner |
 | `E53` | selected target repository clone failure | runner |
 | `E54` | public DevSpace MCP/OAuth endpoint readiness failure | runner |
@@ -300,7 +286,7 @@ bash tests/workflow-security.test.sh
 bash tests/remote-services-security.test.sh
 bash tests/devspace-session.test.sh
 bash tests/t3code-session.test.sh
-bash tests/named-tunnel.test.sh
+bash tests/quick-tunnel.test.sh
 bash tests/development-cache.test.sh
 bash tests/startup-optimization.test.sh
 bash -n scripts/*.sh tests/*.sh
