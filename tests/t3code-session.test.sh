@@ -11,7 +11,7 @@ TEMP_ROOT="$(mktemp -d)"
 MOCK_BIN="$TEMP_ROOT/bin"
 MOCK_HOME="$TEMP_ROOT/home"
 MOCK_RUNNER_TEMP="$TEMP_ROOT/runner-temp"
-PUBLIC_URL='https://t3-repo-07.example.com'
+PUBLIC_URL='https://mock-t3.trycloudflare.com'
 PAIRING_TOKEN='pairing-token-123'
 
 fail() {
@@ -26,7 +26,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$MOCK_BIN" "$MOCK_HOME" "$MOCK_RUNNER_TEMP"
+mkdir -p "$MOCK_BIN" "$MOCK_HOME" \
+  "$MOCK_RUNNER_TEMP/private-runner-diagnostics"
+printf '%s\n' "$PUBLIC_URL" \
+  > "$MOCK_RUNNER_TEMP/private-runner-diagnostics/t3code-public-url"
+chmod 0600 "$MOCK_RUNNER_TEMP/private-runner-diagnostics/t3code-public-url"
 
 cat > "$MOCK_BIN/npm" <<'MOCK'
 #!/usr/bin/env bash
@@ -84,7 +88,6 @@ stderr_file="$TEMP_ROOT/stderr"
 PATH="$MOCK_BIN:$PATH" \
 HOME="$MOCK_HOME" \
 RUNNER_TEMP="$MOCK_RUNNER_TEMP" \
-T3_PUBLIC_URL="$PUBLIC_URL" \
   bash "$START_SCRIPT" >"$stdout_file" 2>"$stderr_file"
 
 connection_dir="$MOCK_HOME/private-runner-session/t3code"
@@ -93,7 +96,7 @@ connection_file="$connection_dir/connection.txt"
 [[ "$(stat -c '%a' "$connection_file")" == '600' ]] || \
   fail 'T3 connection file permissions are not private'
 grep -Fxq "T3_URL=$PUBLIC_URL" "$connection_file" || \
-  fail 'T3 connection file does not contain the fixed URL'
+  fail 'T3 connection file does not contain the Quick Tunnel URL'
 grep -Fxq "PAIRING_URL=$PUBLIC_URL/pair#token=$PAIRING_TOKEN" "$connection_file" || \
   fail 'T3 connection file does not contain the pairing URL'
 
