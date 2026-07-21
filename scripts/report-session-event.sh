@@ -8,6 +8,38 @@ source "$ROOT_DIR/scripts/lib/session-event.sh"
 # shellcheck source=scripts/lib/lark-webhook.sh
 source "$ROOT_DIR/scripts/lib/lark-webhook.sh"
 
+lark_session_active_path() {
+  printf '%s/private-runner-session/lark-session-active\n' "${HOME:?HOME is required}"
+}
+
+lark_session_is_active() {
+  local value=''
+  value="$(session_event_read_private_line "$(lark_session_active_path)" 2>/dev/null)" || return 1
+  [[ "$value" == active ]]
+}
+
+lark_session_mark_active() {
+  local path=''
+  local directory=''
+  local temporary=''
+
+  path="$(lark_session_active_path)" || return 1
+  directory="$(dirname "$path")"
+  install -d -m 0700 "$directory" || return 1
+  [[ -d "$directory" && ! -L "$directory" && -O "$directory" ]] || return 1
+  temporary="$(mktemp "$directory/.session-active.XXXXXX")" || return 1
+  umask 077
+  if ! printf 'active\n' > "$temporary" || ! chmod 0600 "$temporary"; then
+    rm -f "$temporary"
+    return 1
+  fi
+  mv -f "$temporary" "$path" || {
+    rm -f "$temporary"
+    return 1
+  }
+  chmod 0600 "$path" || return 1
+}
+
 lark_delivery_directory() {
   printf '%s/private-runner-session/lark-events\n' "${HOME:?HOME is required}"
 }
@@ -103,6 +135,15 @@ if ! lark_webhook_enabled; then
   exit 0
 fi
 
+# The workflow invokes `starting` only after request preflight succeeds. Later
+# always() steps can still run after an earlier failure, so suppress them unless
+# this session reached the starting event. This prevents false degraded/offline
+# notifications for invalid dispatch input while still allowing a failed
+# starting Webhook delivery to be followed by later delivery attempts.
+if [[ "$event" != starting ]] && ! lark_session_is_active; then
+  exit 0
+fi
+
 if session_event_build "$event"; then
   :
 else
@@ -115,6 +156,11 @@ else
   exit 0
 fi
 session_event_export
+
+if [[ "$event" == starting ]] && ! lark_session_mark_active; then
+  lark_webhook_diagnostic session-marker-error
+  exit 0
+fi
 
 # Successful delivery is recorded privately so ordinary workflow retries do not
 # resend the same message. Failed delivery is not marked and remains retryable.
