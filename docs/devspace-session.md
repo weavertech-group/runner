@@ -2,29 +2,19 @@
 
 The private runner workflow can optionally start a DevSpace MCP server for the
 selected target repository. The service is disabled by default and is exposed
-through a pre-created Cloudflare Named Tunnel with a stable HTTPS hostname.
+through a temporary Cloudflare Quick Tunnel with a random HTTPS URL.
 
 See also the repository-wide [security policy and threat model](../SECURITY.md)
 and the [T3 Code session guide](t3code-session.md).
 
 ## Required configuration
 
-For each opaque target, configure a remotely-managed Cloudflare Tunnel and a
-DevSpace hostname that routes to:
+No Cloudflare account setup is required. The workflow creates an anonymous Quick
+Tunnel to `http://127.0.0.1:7676` during each enabled session.
 
-```text
-https://mcp-repo-07.example.com -> http://127.0.0.1:7676
-```
-
-Store these values in the target's `session--<opaque-id>` GitHub Environment:
-
-```text
-CLOUDFLARE_TUNNEL_TOKEN=<target-specific tunnel token>
-DEVSPACE_PUBLIC_URL=https://mcp-repo-07.example.com
-```
-
-When T3 Code is also enabled, use a separate hostname for T3. The two services
-must not share one hostname or use path prefixes.
+The target's GitHub Environment only needs the normal Headscale and repository
+secrets documented in the README. Do not add Cloudflare account credentials or a
+preconfigured DevSpace URL.
 
 ## Start a session
 
@@ -44,14 +34,15 @@ The runner then:
 1. configures the path-scoped Git credential for the selected target;
 2. clones the selected repository once into `$RUNNER_TEMP/target-workspace`;
 3. downloads the pinned `cloudflared` binary and verifies its checksum;
-4. installs pinned `@waishnav/devspace@1.0.4`;
-5. starts DevSpace on `127.0.0.1:7676` using the fixed public base URL;
-6. starts the pre-created Named Tunnel using a mode-`0600` token file;
+4. starts a dedicated Quick Tunnel and records its random URL privately;
+5. installs pinned `@waishnav/devspace@1.0.4`;
+6. starts DevSpace on `127.0.0.1:7676` using that URL as its public base URL;
 7. verifies the local OAuth metadata and public protected-resource endpoints; and
 8. writes the connection details to the runner user's home directory.
 
 T3 Code, DevSpace, SSH users, Codex, and Claude share the same Git working tree
-when those services are enabled together.
+when those services are enabled together. T3 Code receives a different Quick
+Tunnel URL.
 
 ## Read the connection details
 
@@ -62,10 +53,10 @@ tailscale ssh runner@gha-<run-id>-<run-attempt>
 cat ~/private-runner-session/devspace/connection.txt
 ```
 
-The file contains:
+The file contains values similar to:
 
 ```text
-MCP_URL=https://mcp-repo-07.example.com/mcp
+MCP_URL=https://random-name.trycloudflare.com/mcp
 OWNER_TOKEN=<random-owner-password>
 ```
 
@@ -73,24 +64,18 @@ The directory has mode `0700` and the connection files have mode `0600`. The MCP
 URL and Owner Token are not written to workflow outputs, artifacts, or public
 Actions logs.
 
-The public hostname remains stable across workflow runs. The Owner Token changes
-on every run and stops working when the ephemeral runner is destroyed.
+## Quick Tunnel lifecycle
 
-## Named Tunnel lifecycle
+A new workflow run creates a new URL and Owner Token. Both stop working when the
+runner session ends. Update any saved MCP connection with the current URL.
 
-The workflow does not create Cloudflare account resources. An administrator
-pre-creates the Tunnel, DNS record, and published application route. The
-workflow only starts a connector using `CLOUDFLARE_TUNNEL_TOKEN`.
+The workflow creates no Cloudflare account resource, DNS record, custom hostname,
+or long-lived connector credential. During normal finalization it terminates
+DevSpace and its Quick Tunnel process, removes connection and URL files, deletes
+the shared workspace, and removes the repository credential.
 
-Sessions for the same opaque target are serialized. Running the same Tunnel token
-from two different opaque targets would still create Cloudflare replicas and can
-route requests to inconsistent runner state, so do not reuse a Tunnel credential
-between targets.
-
-During normal finalization, the workflow terminates DevSpace and cloudflared,
-removes the Tunnel token file and connection files, deletes the shared workspace,
-and removes the repository credential. The stable hostname remains configured
-but has no healthy origin after the job ends.
+Concurrent sessions for the same opaque target are allowed because every run has
+an independent workspace, DevSpace state directory, Quick Tunnel, and Owner Token.
 
 ## Runtime policy
 
@@ -113,8 +98,8 @@ network policy. Only authorize a trusted MCP client.
 ## Forks and pull requests
 
 Forks do not inherit upstream Secrets, Environments, deployment protection,
-Headscale access, private repository credentials, Cloudflare Tunnel tokens, or
-stable hostnames. Never copy production credentials into an untrusted fork.
+Headscale access, or private repository credentials. Never copy production
+credentials into an untrusted fork.
 
 This privileged workflow remains manual-only. Workflow, script, dependency, and
 security-policy changes require protected-branch and Code Owner review because a
@@ -132,7 +117,7 @@ Useful files include:
 
 ```text
 cloudflared-install.log
-cloudflared.log
+cloudflared-devspace.log
 devspace-setup.log
 devspace.log
 public-services.log
@@ -146,7 +131,7 @@ Do not upload these files as artifacts.
 | Code | Meaning |
 | --- | --- |
 | `E50` | An optional public service was requested without a target or private SSH |
-| `E51` | cloudflared installation, token/configuration, or connector startup failed |
+| `E51` | cloudflared installation, Quick Tunnel startup, or URL discovery failed |
 | `E52` | DevSpace installation, startup, or local readiness failed |
 | `E53` | The selected target repository could not be cloned |
 | `E54` | The public MCP/OAuth endpoint did not become ready |
