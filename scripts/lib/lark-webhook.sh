@@ -23,6 +23,33 @@ lark_webhook_validate_config() {
   [[ "$LARK_WEBHOOK_SECRET" != *$'\n'* && "$LARK_WEBHOOK_SECRET" != *$'\r'* ]] || return 1
 }
 
+lark_webhook_temporary_access_enabled() {
+  [[ "${LARK_WEBHOOK_INCLUDE_TEMPORARY_ACCESS-false}" == true ]]
+}
+
+lark_webhook_service_access() {
+  local value=''
+  local expected_prefix=''
+
+  case "$SE_SERVICE" in
+    devspace)
+      value="$(session_event_read_private_line "${HOME:?HOME is required}/private-runner-session/devspace/owner-token")" || return 1
+      [[ "$value" =~ ^[a-f0-9]{64}$ ]] || return 1
+      ;;
+    t3code)
+      value="$(session_event_read_private_line "${HOME:?HOME is required}/private-runner-session/t3code/pairing-url")" || return 1
+      expected_prefix="${SE_SERVICE_URL%/}/pair#token="
+      [[ "$value" == "$expected_prefix"* ]] || return 1
+      [[ "${value#"$expected_prefix"}" =~ ^[^[:space:]#]{1,1024}$ ]] || return 1
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  printf '%s\n' "$value"
+}
+
 lark_webhook_message() {
   case "$SE_EVENT" in
     starting)
@@ -44,14 +71,28 @@ lark_webhook_message() {
         "$SE_EXPIRES_AT" "$SE_ACTIONS_URL"
       ;;
     service-online)
+      local temporary_access=''
+      if lark_webhook_temporary_access_enabled; then
+        temporary_access="$(lark_webhook_service_access)" || return 1
+      fi
       case "$SE_SERVICE" in
         devspace)
-          printf 'DevSpace online\nTarget: %s\nMCP URL: %s\nTemporary access: available through SSH fallback\nExpires: %s\nRun: %s' \
-            "$SE_TARGET_ID" "$SE_SERVICE_URL" "$SE_EXPIRES_AT" "$SE_ACTIONS_URL"
+          if [[ -n "$temporary_access" ]]; then
+            printf 'DevSpace online\nTarget: %s\nMCP URL: %s\nOwner Token: %s\nTemporary access expires with this runner session.\nExpires: %s\nRun: %s' \
+              "$SE_TARGET_ID" "$SE_SERVICE_URL" "$temporary_access" "$SE_EXPIRES_AT" "$SE_ACTIONS_URL"
+          else
+            printf 'DevSpace online\nTarget: %s\nMCP URL: %s\nOwner Token: available through SSH fallback\nExpires: %s\nRun: %s' \
+              "$SE_TARGET_ID" "$SE_SERVICE_URL" "$SE_EXPIRES_AT" "$SE_ACTIONS_URL"
+          fi
           ;;
         t3code)
-          printf 'T3 Code online\nTarget: %s\nT3 URL: %s\nTemporary access: available through SSH fallback\nExpires: %s\nRun: %s' \
-            "$SE_TARGET_ID" "$SE_SERVICE_URL" "$SE_EXPIRES_AT" "$SE_ACTIONS_URL"
+          if [[ -n "$temporary_access" ]]; then
+            printf 'T3 Code online\nTarget: %s\nT3 URL: %s\nPairing URL: %s\nTemporary access expires with this runner session.\nExpires: %s\nRun: %s' \
+              "$SE_TARGET_ID" "$SE_SERVICE_URL" "$temporary_access" "$SE_EXPIRES_AT" "$SE_ACTIONS_URL"
+          else
+            printf 'T3 Code online\nTarget: %s\nT3 URL: %s\nPairing URL: available through SSH fallback\nExpires: %s\nRun: %s' \
+              "$SE_TARGET_ID" "$SE_SERVICE_URL" "$SE_EXPIRES_AT" "$SE_ACTIONS_URL"
+          fi
           ;;
         *)
           return 1
