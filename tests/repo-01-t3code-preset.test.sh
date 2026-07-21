@@ -51,7 +51,7 @@ if grep -Eq 'HEADSCALE_AUTHKEY|TARGET_REPO_AUTH|LARK_WEBHOOK_(URL|SECRET)' "$PRE
 fi
 
 # The temporary smoke workflow is deliberately constrained to the reviewed marker
-# addition on main. It must verify T3/Lark readiness and cancel the long-running run.
+# addition on main. It must verify T3/Lark readiness, report its run IDs, and clean up.
 grep -Fq 'name: Repo 01 T3 Code Smoke' "$SMOKE" || fail 'smoke workflow name changed'
 grep -Fq 'branches:' "$SMOKE" || fail 'smoke trigger lacks branch restriction'
 grep -Fq '      - main' "$SMOKE" || fail 'smoke trigger is not limited to main'
@@ -59,6 +59,8 @@ grep -Fq '      - .github/repo-01-t3code-smoke.pending' "$SMOKE" || \
   fail 'smoke trigger is not limited to the one-time marker'
 grep -Fq "if: \${{ github.repository == 'weavertech-group/runner' }}" "$SMOKE" || \
   fail 'smoke workflow lacks repository guard'
+grep -Fq 'actions: write' "$SMOKE" || fail 'smoke cannot manage the downstream run'
+grep -Fq 'issues: write' "$SMOKE" || fail 'smoke cannot report auditable status'
 grep -Fq 'timeout-minutes: 45' "$SMOKE" || fail 'smoke workflow lacks a bounded timeout'
 grep -Fq 'gh workflow run private-runner-session.yml' "$SMOKE" || \
   fail 'smoke workflow does not dispatch the shared workflow'
@@ -68,6 +70,7 @@ grep -Fq -- '--raw-field enable_devspace=false' "$SMOKE" || fail 'smoke must dis
 grep -Fq -- '--raw-field enable_t3code=true' "$SMOKE" || fail 'smoke must enable T3 Code'
 grep -Fq 'Verify public T3 Code' "$SMOKE" || fail 'smoke does not wait for public T3 readiness'
 grep -Fq 'Report optional services online' "$SMOKE" || fail 'smoke does not wait for Lark reporting'
+grep -Fq 'gh issue comment 24' "$SMOKE" || fail 'smoke does not report status to issue 24'
 grep -Fq 'gh run cancel "$RUN_ID"' "$SMOKE" || fail 'smoke does not cancel the session'
 grep -Fq '$steps["Finalize"]' "$SMOKE" || fail 'smoke does not verify final cleanup'
 
