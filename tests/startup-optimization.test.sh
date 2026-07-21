@@ -61,10 +61,10 @@ grep -Fq 'VERIFY_AI_TOOLS: false' "$WORKFLOW" || \
 grep -Fq 'verify_ai_tools="${VERIFY_AI_TOOLS:-true}"' "$VERIFY_SCRIPT" || \
   fail 'environment verifier cannot skip AI tools for fixed-cache validation'
 
-execute_line="$(grep -n -- '- name: Execute' "$WORKFLOW" | cut -d: -f1)"
+hold_line="$(grep -n -- '- name: Keep session alive' "$WORKFLOW" | cut -d: -f1)"
 status_line="$(grep -n -- '- name: Publish development environment status' "$WORKFLOW" | cut -d: -f1)"
-[[ "$status_line" -lt "$execute_line" ]] || \
-  fail 'setup status is not published before the long-running session'
+[[ "$status_line" -lt "$hold_line" ]] || \
+  fail 'setup status is not published before the durable session hold'
 
 service_prerequisite_block="$(sed -n '/- name: Validate optional service prerequisites/,/- name: Install optional service tools/p' "$WORKFLOW")"
 grep -Fq '"$ENABLE_DEVSPACE" == true && "$FIXED_VERIFY" != success' \

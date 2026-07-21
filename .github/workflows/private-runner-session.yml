@@ -5,26 +5,25 @@ on:
     inputs:
       target_id:
         description: Optional public opaque target identifier
-        required: false
         type: string
       enable_ssh:
         description: Enable private SSH access
-        required: false
         default: true
         type: boolean
       enable_devspace:
         description: Start DevSpace MCP for the selected target repository
-        required: false
         default: false
         type: boolean
       enable_t3code:
         description: Start T3 Code for the selected target repository
-        required: false
+        default: false
+        type: boolean
+      non_durable:
+        description: Finalize immediately after setup instead of keeping the session alive
         default: false
         type: boolean
       ssh_public_key:
         description: Optional fallback Ed25519 public key
-        required: false
         type: string
 
 run-name: Private runner session
@@ -33,9 +32,9 @@ permissions:
   actions: read
   contents: read
 
-concurrency:
-  group: private-runner-${{ github.run_id }}
-  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
 
 jobs:
   resolve-target:
@@ -44,14 +43,13 @@ jobs:
     outputs:
       environment_name: ${{ steps.resolve.outputs.environment_name }}
     steps:
-      - name: Prepare
+      - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
 
       - name: Resolve target
         id: resolve
-        shell: bash
         env:
           TARGET_ID: ${{ inputs.target_id }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -66,24 +64,21 @@ jobs:
     name: Session
     needs: resolve-target
     runs-on: ubuntu-24.04
-    # GitHub-hosted jobs have a hard six-hour execution limit. Keep the runner
-    # alive until the platform terminates the job instead of exiting early.
     timeout-minutes: 360
     environment:
       name: ${{ needs.resolve-target.outputs.environment_name }}
       deployment: false
     steps:
-      - name: Prepare
+      - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
 
-      - name: Validate optional service request
+      - name: Validate request
         if: ${{ (inputs.enable_devspace || inputs.enable_t3code) && (inputs.target_id == '' || ! inputs.enable_ssh) }}
-        shell: bash
         run: |
-          printf 'E50\n' >&2
-          exit 50
+          printf '%s\n' 'Optional services require a target_id and enable_ssh=true.' >&2
+          exit 1
 
       - name: Prepare Node runtime
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -92,7 +87,6 @@ jobs:
 
       - name: Prepare cache keys
         id: cache-keys
-        shell: bash
         run: |
           set -euo pipefail
           # shellcheck source=scripts/development-versions.env
@@ -129,7 +123,6 @@ jobs:
 
       - name: Report session starting
         continue-on-error: true
-        shell: bash
         env:
           LARK_REPORTING_ENABLED: ${{ vars.LARK_REPORTING_ENABLED }}
           LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
@@ -140,13 +133,11 @@ jobs:
 
       - name: Prepare network
         if: ${{ inputs.enable_ssh }}
-        shell: bash
         run: bash scripts/install-tailscale.sh
 
       - name: Connect
         id: connect
         if: ${{ inputs.enable_ssh }}
-        shell: bash
         env:
           HEADSCALE_URL: ${{ secrets.HEADSCALE_URL }}
           HEADSCALE_AUTHKEY: ${{ secrets.HEADSCALE_AUTHKEY }}
@@ -156,7 +147,6 @@ jobs:
       - name: Report SSH online
         if: ${{ inputs.enable_ssh && steps.connect.outcome == 'success' }}
         continue-on-error: true
-        shell: bash
         env:
           LARK_REPORTING_ENABLED: ${{ vars.LARK_REPORTING_ENABLED }}
           LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
@@ -168,14 +158,12 @@ jobs:
 
       - name: Prepare repository access
         if: ${{ inputs.target_id != '' }}
-        shell: bash
         env:
           TARGET_REPO: ${{ secrets.TARGET_REPO }}
           TARGET_REPO_AUTH: ${{ secrets.TARGET_REPO_AUTH }}
         run: bash scripts/configure-repository-credential.sh
 
       - name: Mark development environment installing
-        shell: bash
         run: |
           set -euo pipefail
           install -d -m 0700 "$HOME/private-runner-session"
@@ -185,7 +173,6 @@ jobs:
       - name: Install development environment
         id: development-install
         continue-on-error: true
-        shell: bash
         env:
           DEVELOPMENT_CACHE_HIT: ${{ steps.development-cache.outputs.cache-hit }}
         run: bash scripts/setup-development-environment.sh
@@ -193,7 +180,6 @@ jobs:
       - name: Verify fixed development environment
         id: fixed-verify
         continue-on-error: true
-        shell: bash
         env:
           VERIFY_AI_TOOLS: false
         run: bash scripts/verify-development-environment.sh
@@ -217,7 +203,6 @@ jobs:
       - name: Install AI coding CLIs
         id: ai-tools
         continue-on-error: true
-        shell: bash
         run: |
           npm install --global --no-audit --no-fund \
             @openai/codex@latest \
@@ -226,7 +211,6 @@ jobs:
       - name: Verify complete development environment
         id: complete-verify
         continue-on-error: true
-        shell: bash
         run: bash scripts/verify-development-environment.sh
 
       - name: Save npm download cache
@@ -241,7 +225,6 @@ jobs:
 
       - name: Publish development environment status
         if: ${{ always() }}
-        shell: bash
         env:
           DEVELOPMENT_INSTALL: ${{ steps.development-install.outcome }}
           FIXED_VERIFY: ${{ steps.fixed-verify.outcome }}
@@ -258,12 +241,12 @@ jobs:
             status=ready
           fi
           printf '%s\n' "$status" > "$HOME/private-runner-session/setup-status"
-          {
-            printf 'development_install=%s\n' "$DEVELOPMENT_INSTALL"
-            printf 'fixed_verify=%s\n' "$FIXED_VERIFY"
-            printf 'ai_tools=%s\n' "$AI_TOOLS"
-            printf 'complete_verify=%s\n' "$COMPLETE_VERIFY"
-          } > "$HOME/private-runner-session/setup-details"
+          printf '%s\n' \
+            "development_install=$DEVELOPMENT_INSTALL" \
+            "fixed_verify=$FIXED_VERIFY" \
+            "ai_tools=$AI_TOOLS" \
+            "complete_verify=$COMPLETE_VERIFY" \
+            > "$HOME/private-runner-session/setup-details"
           chmod 0600 \
             "$HOME/private-runner-session/setup-status" \
             "$HOME/private-runner-session/setup-details"
@@ -271,7 +254,6 @@ jobs:
       - name: Report development environment status
         if: ${{ always() }}
         continue-on-error: true
-        shell: bash
         env:
           LARK_REPORTING_ENABLED: ${{ vars.LARK_REPORTING_ENABLED }}
           LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
@@ -280,19 +262,13 @@ jobs:
           SESSION_SSH_ONLINE: ${{ inputs.enable_ssh && steps.connect.outcome == 'success' }}
           SESSION_ERROR_CODE: setup-degraded
         run: |
-          status="$(cat "$HOME/private-runner-session/setup-status" 2>/dev/null || true)"
-          case "$status" in
-            ready)
-              bash scripts/report-session-event.sh setup-ready
-              ;;
-            degraded)
-              bash scripts/report-session-event.sh setup-degraded
-              ;;
+          case "$(cat "$HOME/private-runner-session/setup-status" 2>/dev/null || true)" in
+            ready) bash scripts/report-session-event.sh setup-ready ;;
+            degraded) bash scripts/report-session-event.sh setup-degraded ;;
           esac
 
       - name: Validate optional service prerequisites
         if: ${{ inputs.enable_devspace || inputs.enable_t3code }}
-        shell: bash
         env:
           ENABLE_DEVSPACE: ${{ inputs.enable_devspace }}
           ENABLE_T3CODE: ${{ inputs.enable_t3code }}
@@ -301,17 +277,16 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "$ENABLE_DEVSPACE" == true && "$FIXED_VERIFY" != success ]]; then
-            printf 'E52\n' >&2
-            exit 52
+            printf '%s\n' 'DevSpace was not started because fixed development environment verification failed.' >&2
+            exit 1
           fi
           if [[ "$ENABLE_T3CODE" == true && "$COMPLETE_VERIFY" != success ]]; then
-            printf 'E62\n' >&2
-            exit 62
+            printf '%s\n' 'T3 Code was not started because complete development environment verification failed.' >&2
+            exit 1
           fi
 
       - name: Install optional service tools
         if: ${{ inputs.enable_devspace || inputs.enable_t3code }}
-        shell: bash
         env:
           ENABLE_T3CODE: ${{ inputs.enable_t3code }}
         run: |
@@ -322,14 +297,12 @@ jobs:
 
       - name: Prepare target workspace
         if: ${{ inputs.enable_devspace || inputs.enable_t3code }}
-        shell: bash
         env:
           TARGET_REPO: ${{ secrets.TARGET_REPO }}
         run: bash scripts/prepare-target-workspace.sh
 
       - name: Start Cloudflare Quick Tunnels
         if: ${{ inputs.enable_devspace || inputs.enable_t3code }}
-        shell: bash
         env:
           ENABLE_DEVSPACE: ${{ inputs.enable_devspace }}
           ENABLE_T3CODE: ${{ inputs.enable_t3code }}
@@ -337,19 +310,16 @@ jobs:
 
       - name: Start DevSpace
         if: ${{ inputs.enable_devspace }}
-        shell: bash
         run: bash scripts/start-devspace.sh
 
       - name: Start T3 Code
         if: ${{ inputs.enable_t3code }}
-        shell: bash
         run: bash scripts/start-t3code.sh
 
       - name: Verify public DevSpace
         id: verify-devspace-public
         if: ${{ inputs.enable_devspace }}
         continue-on-error: true
-        shell: bash
         env:
           ENABLE_DEVSPACE: true
           ENABLE_T3CODE: false
@@ -359,7 +329,6 @@ jobs:
         id: verify-t3code-public
         if: ${{ inputs.enable_t3code }}
         continue-on-error: true
-        shell: bash
         env:
           ENABLE_DEVSPACE: false
           ENABLE_T3CODE: true
@@ -368,7 +337,6 @@ jobs:
       - name: Report optional services online
         if: ${{ always() && (inputs.enable_devspace || inputs.enable_t3code) }}
         continue-on-error: true
-        shell: bash
         env:
           LARK_REPORTING_ENABLED: ${{ vars.LARK_REPORTING_ENABLED }}
           LARK_WEBHOOK_INCLUDE_TEMPORARY_ACCESS: ${{ vars.LARK_WEBHOOK_INCLUDE_TEMPORARY_ACCESS }}
@@ -390,7 +358,6 @@ jobs:
 
       - name: Validate public optional services
         if: ${{ always() && (steps.verify-devspace-public.outcome != 'skipped' || steps.verify-t3code-public.outcome != 'skipped') }}
-        shell: bash
         env:
           ENABLE_DEVSPACE: ${{ inputs.enable_devspace }}
           ENABLE_T3CODE: ${{ inputs.enable_t3code }}
@@ -398,23 +365,21 @@ jobs:
           T3CODE_PUBLIC_VERIFY: ${{ steps.verify-t3code-public.outcome }}
         run: |
           if [[ "$ENABLE_DEVSPACE" == true && "$DEVSPACE_PUBLIC_VERIFY" != success ]]; then
-            printf 'E54\n' >&2
-            exit 54
+            printf '%s\n' 'Public DevSpace verification failed.' >&2
+            exit 1
           fi
           if [[ "$ENABLE_T3CODE" == true && "$T3CODE_PUBLIC_VERIFY" != success ]]; then
-            printf 'E63\n' >&2
-            exit 63
+            printf '%s\n' 'Public T3 Code verification failed.' >&2
+            exit 1
           fi
 
-      - name: Execute
-        if: ${{ inputs.enable_ssh }}
-        shell: bash
+      - name: Keep session alive
+        if: ${{ inputs.enable_ssh && ! inputs.non_durable }}
         run: sleep infinity
 
       - name: Report session offline
         if: ${{ always() }}
         continue-on-error: true
-        shell: bash
         env:
           LARK_REPORTING_ENABLED: ${{ vars.LARK_REPORTING_ENABLED }}
           LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
@@ -425,5 +390,4 @@ jobs:
 
       - name: Finalize
         if: ${{ always() }}
-        shell: bash
         run: bash scripts/cleanup.sh
