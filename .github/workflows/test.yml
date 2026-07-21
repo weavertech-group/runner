@@ -26,9 +26,21 @@ jobs:
         shell: bash
         run: bash tests/workflow-security.test.sh
 
+      - name: Test remote service security
+        shell: bash
+        run: bash tests/remote-services-security.test.sh
+
       - name: Test DevSpace session
         shell: bash
         run: bash tests/devspace-session.test.sh
+
+      - name: Test T3 Code session
+        shell: bash
+        run: bash tests/t3code-session.test.sh
+
+      - name: Test named tunnel
+        shell: bash
+        run: bash tests/named-tunnel.test.sh
 
       - name: Test development cache
         shell: bash
