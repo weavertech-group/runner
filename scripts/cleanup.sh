@@ -2,8 +2,9 @@
 
 set -u
 
-diagnostic_dir="${RUNNER_TEMP:-/tmp}/private-runner-diagnostics"
-connection_dir="${HOME:-/home/runner}/private-runner-session/devspace"
+runner_temp="${RUNNER_TEMP:-/tmp}"
+diagnostic_dir="$runner_temp/private-runner-diagnostics"
+connection_root="${HOME:-/home/runner}/private-runner-session"
 
 stop_process_group() {
   local pid_file="$1"
@@ -21,9 +22,17 @@ stop_process_group() {
   kill -KILL -- "-$pid" >/dev/null 2>&1 || kill -KILL "$pid" >/dev/null 2>&1 || true
 }
 
-stop_process_group "$diagnostic_dir/devspace.pid"
 stop_process_group "$diagnostic_dir/cloudflared.pid"
-rm -rf "$connection_dir"
+stop_process_group "$diagnostic_dir/t3code.pid"
+stop_process_group "$diagnostic_dir/devspace.pid"
+rm -f "$diagnostic_dir/cloudflared-token"
+rm -rf "$connection_root/devspace" "$connection_root/t3code"
+rm -rf \
+  "$runner_temp/target-workspace" \
+  "$runner_temp/devspace-state" \
+  "$runner_temp/devspace-worktrees" \
+  "$runner_temp/devspace-config" \
+  "$runner_temp/t3code-home"
 
 if command -v tailscale >/dev/null 2>&1; then
   sudo tailscale logout >/dev/null 2>&1 || true
@@ -36,6 +45,6 @@ if [[ -r "$diagnostic_dir/tailscaled.pid" ]]; then
   fi
 fi
 
-rm -f "${RUNNER_TEMP:-/tmp}/target-repo-credential"
+rm -f "$runner_temp/target-repo-credential"
 git config --global --unset-all credential.helper >/dev/null 2>&1 || true
 git config --global --unset-all credential.https://github.com.useHttpPath >/dev/null 2>&1 || true
