@@ -50,6 +50,10 @@ jobs:
         shell: bash
         run: bash tests/lark-lifecycle.test.sh
 
+      - name: Test Lark optional services
+        shell: bash
+        run: bash tests/lark-services.test.sh
+
       - name: Test development cache
         shell: bash
         run: bash tests/development-cache.test.sh
