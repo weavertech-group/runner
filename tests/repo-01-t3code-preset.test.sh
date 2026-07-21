@@ -72,7 +72,8 @@ grep -Fq -- '--raw-field enable_t3code=true' "$SMOKE" || fail 'smoke must enable
 grep -Fq 'Verify public T3 Code' "$SMOKE" || fail 'smoke does not wait for public T3 readiness'
 grep -Fq 'Report optional services online' "$SMOKE" || fail 'smoke does not wait for Lark reporting'
 grep -Fq 'gh issue comment 24' "$SMOKE" || fail 'smoke does not report status to issue 24'
-grep -Fq "grep -oE 'E(51|61)'" "$SMOKE" || fail 'smoke does not report the stable tool failure code'
+grep -Fq "grep -oE 'E51|E61(:[a-z-]+)?'" "$SMOKE" || \
+  fail 'smoke does not report the staged tool failure code'
 grep -Fq 'gh run cancel "$RUN_ID"' "$SMOKE" || fail 'smoke does not cancel the session'
 grep -Fq '$steps["Finalize"]' "$SMOKE" || fail 'smoke does not verify final cleanup'
 
