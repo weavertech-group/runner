@@ -9,6 +9,9 @@ devspace_connection_dir="${HOME:-/home/runner}/private-runner-session/devspace"
 t3code_connection_dir="${HOME:-/home/runner}/private-runner-session/t3code"
 lark_event_dir="$session_dir/lark-events"
 lark_expiry_file="$session_dir/lark-session-expiry"
+lark_active_file="$session_dir/lark-session-active"
+setup_status_file="$session_dir/setup-status"
+setup_details_file="$session_dir/setup-details"
 
 stop_process_group() {
   local pid_file="$1"
@@ -35,7 +38,12 @@ rm -f \
   "$diagnostic_dir/t3code-public-url" \
   "$diagnostic_dir/devspace-public-url"
 rm -rf "$devspace_connection_dir" "$t3code_connection_dir" "$lark_event_dir"
-rm -f "$lark_expiry_file" "$runner_temp"/lark-webhook-response.*
+rm -f \
+  "$lark_expiry_file" \
+  "$lark_active_file" \
+  "$setup_status_file" \
+  "$setup_details_file" \
+  "$runner_temp"/lark-webhook-response.*
 rm -rf \
   "$runner_temp/target-workspace" \
   "$runner_temp/devspace-state" \
