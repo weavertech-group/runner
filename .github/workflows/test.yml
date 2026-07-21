@@ -58,6 +58,10 @@ jobs:
         shell: bash
         run: bash tests/lark-mvp.test.sh
 
+      - name: Test repo-01 T3 Code preset
+        shell: bash
+        run: bash tests/repo-01-t3code-preset.test.sh
+
       - name: Test development cache
         shell: bash
         run: bash tests/development-cache.test.sh
