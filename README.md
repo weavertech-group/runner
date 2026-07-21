@@ -5,17 +5,19 @@ to a private Headscale network, and keeps it available over Tailscale SSH. The
 runner has no public SSH listener. An optional opaque target ID selects exactly
 one GitHub Environment without exposing the private repository name.
 
-By default, the workflow is only a secure network/SSH handoff. An explicit
-`enable_devspace` option can additionally clone the selected target repository,
-start a DevSpace MCP server, and expose it through a temporary Cloudflare Quick
-Tunnel. It does not run issue agents, create pull requests, or implement a task
-queue.
+By default, the workflow is only a secure network/SSH handoff. Explicit
+`enable_devspace` and `enable_t3code` options can additionally clone the selected
+target repository once, start DevSpace MCP and/or T3 Code, and expose those
+services through a pre-created Cloudflare Named Tunnel with stable HTTPS
+hostnames. It does not run issue agents, create pull requests, or implement a
+task queue.
 
 For repeatable setup, operation, validation, credential rotation, cleanup, and
 troubleshooting, use the privacy-safe
-[operations runbook](docs/runner-operations-runbook.md). The optional MCP service
-is documented separately in the [DevSpace session guide](docs/devspace-session.md).
-This README describes the design invariants.
+[operations runbook](docs/runner-operations-runbook.md). Optional public services
+are documented in the [DevSpace session guide](docs/devspace-session.md) and
+[T3 Code session guide](docs/t3code-session.md). This README describes the design
+invariants.
 
 ## What is implemented
 
@@ -24,13 +26,19 @@ This README describes the design invariants.
 - Headscale URL override and Tailscale SSH without changing runner DNS.
 - Optional Ed25519 public-key mode using system OpenSSH on the tailnet only.
 - Public opaque-ID allowlist and one GitHub Environment per target repository.
+- At most one active workflow session for each opaque target.
 - A path-scoped Git credential store for the selected repository only.
-- Optional DevSpace `1.0.4` with Node.js `22.19.0`.
+- One shared target working tree for SSH, DevSpace, T3 Code, Codex, and Claude.
+- Optional pinned DevSpace `1.0.4`.
+- Optional pinned T3 Code `0.0.28`, bound to `127.0.0.1:3773`.
 - Pinned cloudflared `2026.7.2` Linux binary with an embedded SHA-256 check.
-- DevSpace MCP URL and Owner Token stored only in a mode-`0600` local file.
+- Target-specific Named Tunnel tokens passed through mode-`0600` files.
+- Separate fixed HTTPS hostnames for T3 Code and DevSpace.
+- Public HTTP readiness checks and a T3 WebSocket upgrade check.
+- Connection URLs and credentials stored only in mode-`0600` local files.
 - Minimal public output; detailed local diagnostics are never uploaded.
-- Best-effort service termination, logout, and ephemeral-node cleanup when a job
-  is cancelled.
+- Best-effort service termination, credential removal, logout, and ephemeral-node
+  cleanup when a job is cancelled.
 
 ## Required administrator setup
 
@@ -58,9 +66,9 @@ members of `group:platform-admins`; add explicit CIDR destinations for any
 existing subnet routes.
 
 The policy example also enables the `magicdns-aaaa` node attribute. Keep this
-for clients that choose to use MagicDNS when the Headscale IPv6 pool is
-enabled. Runner sessions and workstations that coexist with Quantumult X do
-not install these DNS settings into the operating system.
+for clients that choose to use MagicDNS when the Headscale IPv6 pool is enabled.
+Runner sessions and workstations that coexist with Quantumult X do not install
+these DNS settings into the operating system.
 
 The example additionally uses `hosts` aliases to apply the official
 `disable-ipv4` node attribute only to the macOS devices that coexist with
@@ -83,9 +91,9 @@ headscale preauthkeys create \
 ```
 
 Team workstations must join the same Headscale network and be included in
-`group:platform-admins` (or the replacement group). A workstation that
-coexists with Quantumult X must join with `--accept-dns=false` so Quantumult X
-remains the only manager of system DNS.
+`group:platform-admins` (or the replacement group). A workstation that coexists
+with Quantumult X must join with `--accept-dns=false` so Quantumult X remains the
+only manager of system DNS.
 
 Give each person a separate Headscale user. On Headscale versions without a
 node-owner transfer command, an existing device must reauthenticate under its
@@ -111,16 +119,16 @@ the same automatic log masking as other Actions secrets.
 | --- | --- | --- |
 | Secret | `HEADSCALE_URL` | The externally reachable HTTPS control URL |
 
-Do not create repository-level `HEADSCALE_AUTHKEY`, because any other trusted
-workflow in the repository could reference it. Create a GitHub Environment
-named `session--none` containing only environment secret `HEADSCALE_AUTHKEY`.
-The workflow uses this Environment when no target is selected.
+Do not create repository-level target, Headscale auth, or Cloudflare credentials.
+Create a GitHub Environment named `session--none` containing only Environment
+secret `HEADSCALE_AUTHKEY`. The workflow uses this Environment when no target is
+selected.
 
 For each allowed repository:
 
 1. Allocate a public opaque ID such as `repo-07`.
 2. Create an Environment such as `session--repo-07`.
-3. Add these Environment secrets:
+3. Add the required Environment secrets:
 
    | Secret | Value |
    | --- | --- |
@@ -128,20 +136,38 @@ For each allowed repository:
    | `TARGET_REPO` | The real private `owner/repository` name |
    | `TARGET_REPO_AUTH` | A token limited to that repository |
 
-4. Add only the opaque mapping to [.github/target-repositories.txt](.github/target-repositories.txt):
+4. To enable DevSpace or T3 Code, pre-create one remotely-managed Cloudflare
+   Named Tunnel for this target. Add separate published application hostnames:
+
+   ```text
+   t3-repo-07.example.com  -> http://127.0.0.1:3773
+   mcp-repo-07.example.com -> http://127.0.0.1:7676
+   ```
+
+5. Add the applicable Environment secrets:
+
+   | Secret | Required when | Value |
+   | --- | --- | --- |
+   | `CLOUDFLARE_TUNNEL_TOKEN` | Either public service is enabled | Token for this target-specific Tunnel |
+   | `T3_PUBLIC_URL` | T3 Code is enabled | Root HTTPS URL, such as `https://t3-repo-07.example.com` |
+   | `DEVSPACE_PUBLIC_URL` | DevSpace is enabled | Root HTTPS URL, such as `https://mcp-repo-07.example.com` |
+
+6. Add only the opaque mapping to
+   [.github/target-repositories.txt](.github/target-repositories.txt):
 
    ```text
    repo-07 session--repo-07
    ```
 
-Never put a real private repository name in the public allowlist, Environment
-name, workflow input, run name, or step name. The resolver rejects opaque IDs
-not in the allowlist before the credential-bearing job starts.
+Do not reuse one Tunnel token or hostname between opaque targets. Do not put a
+real private repository name in the public allowlist, Environment name, workflow
+input, run name, or step name. The resolver rejects opaque IDs not in the
+allowlist before the credential-bearing job starts.
 
 For every session Environment, restrict deployment branches to the protected
 default branch, enable required reviewers where appropriate, and disable admin
-bypass. The workflow also sets `deployment: false`, so using Environment
-secrets does not create a public deployment record.
+bypass. The workflow also sets `deployment: false`, so using Environment secrets
+does not create a public deployment record.
 
 ### 3. Protect the public repository
 
@@ -152,8 +178,8 @@ the actual security review team. Then configure a default-branch ruleset that:
 - requires a pull request and CODEOWNER approval;
 - blocks force pushes and branch deletion;
 - restricts who can push;
-- requires approval for changes under `.github/workflows/**` if supported by
-  the organization's ruleset setup.
+- requires approval for changes under `.github/workflows/**` if supported by the
+  organization's ruleset setup.
 
 Do not add `pull_request_target`, do not run fork-provided code in this workflow,
 and keep every external Action pinned to a full commit SHA. Workflow dispatch
@@ -162,8 +188,8 @@ inputs and run metadata in this public repository must be treated as public.
 ## Start and connect
 
 From the Actions UI, choose **Private Runner Session** and dispatch it. The
-optional `target_id` value must match the opaque allowlist. Leave `ssh_public_key`
-empty for the default Tailscale SSH mode.
+optional `target_id` value must match the opaque allowlist. Leave
+`ssh_public_key` empty for the default Tailscale SSH mode.
 
 The node name is:
 
@@ -193,43 +219,43 @@ create `/etc/resolver` entries, or pin ephemeral runner addresses in
 it; these workstations and the GitHub-hosted runner simply decline its system
 DNS configuration.
 
-When a target was selected, Git is configured from the protected `TARGET_REPO`
-secret and returns the token only for that repository path. An authorized
-operator can clone the internally known repository without putting a token in
-the command line:
+When a target is selected, Git is configured from protected Environment secrets
+and returns the token only for that repository path. An authorized operator can
+clone the internally known repository without putting a token in the command
+line:
 
 ```bash
 git clone https://github.com/<owner>/<repository>.git
 ```
 
-To start DevSpace automatically, select a non-empty `target_id`, keep
-`enable_ssh` enabled, and set `enable_devspace` to `true`. After connecting over
-private SSH, read the MCP URL and Owner Token:
+To start an optional service, select a non-empty `target_id`, keep `enable_ssh`
+enabled, and set `enable_devspace`, `enable_t3code`, or both to `true`. The
+workflow clones the target once and shares the working tree between services.
+
+Read private connection details over SSH:
 
 ```bash
 cat ~/private-runner-session/devspace/connection.txt
+cat ~/private-runner-session/t3code/connection.txt
 ```
 
-Use the `MCP_URL` value when configuring ChatGPT. Enter `OWNER_TOKEN` when the
-DevSpace OAuth approval page opens. The quick-tunnel URL and token expire with
-the runner session. See the [DevSpace session guide](docs/devspace-session.md)
-for the full procedure and runtime policy.
+The Cloudflare hostname remains stable across runs. DevSpace Owner Tokens and T3
+pairing/session credentials are ephemeral and change each run. The fixed
+hostname has no healthy origin after the workflow ends.
 
 Supplying `ssh_public_key` switches the session to system OpenSSH. Only
 `ssh-ed25519` and `sk-ssh-ed25519@openssh.com` single-line keys are accepted;
-password, keyboard-interactive, and root login remain disabled. Tailscale SSH
-is not enabled in this fallback mode because it owns tailnet TCP port 22 and
-would bypass `authorized_keys`. Find the current runner IPv6 address with
+password, keyboard-interactive, and root login remain disabled. Tailscale SSH is
+not enabled in this fallback mode because it owns tailnet TCP port 22 and would
+bypass `authorized_keys`. Find the current runner IPv6 address with
 `tailscale status`, then connect to that address with `ssh -6`.
 
 The session step waits indefinitely and the job timeout is 360 minutes, so the
 runner stays online until GitHub enforces its six-hour hosted-job limit. Setup
-time is part of that limit, so usable SSH time is slightly less than six full
-hours. Ending or cancelling the workflow destroys the GitHub-hosted runner and
-its local connection files; when GitHub gives finalization steps time to run,
-the cleanup step also stops DevSpace and cloudflared, removes Git credentials,
-and attempts an immediate Headscale logout. Otherwise Headscale's ephemeral-node
-inactivity cleanup removes the disconnected node.
+time is part of that limit. Ending or cancelling the workflow destroys the
+GitHub-hosted runner and its local connection files; when finalization runs, it
+also stops T3 Code, DevSpace, and cloudflared, removes temporary credentials and
+state, deletes Git credentials, and attempts an immediate Headscale logout.
 
 ## Error codes
 
@@ -248,26 +274,34 @@ Only stable error codes are printed publicly:
 | `E30` | fallback SSH public key is invalid | runner |
 | `E40` | job reaches its configured timeout | GitHub Actions conclusion |
 | `E41` | run is cancelled | GitHub Actions conclusion |
-| `E50` | DevSpace requested without a target repository or private SSH | runner |
-| `E51` | cloudflared download, checksum, startup, or URL discovery failure | runner |
+| `E50` | optional public service requested without a target or private SSH | runner |
+| `E51` | cloudflared download, token/configuration, or connector startup failure | runner |
 | `E52` | DevSpace installation, startup, or local readiness failure | runner |
 | `E53` | selected target repository clone failure | runner |
 | `E54` | public DevSpace MCP/OAuth endpoint readiness failure | runner |
+| `E61` | pinned T3 Code installation or verification failure | runner |
+| `E62` | T3 project initialization, startup, or local readiness failure | runner |
+| `E63` | public T3 HTTPS or WebSocket readiness failure | runner |
 
 `E25`, `E40`, and `E41` are platform/client outcomes and cannot reliably be
-emitted by a runner step: a denied client never executes code on the runner,
-and timeout/cancellation can terminate the machine before another step runs.
+emitted by a runner step: a denied client never executes code on the runner, and
+timeout/cancellation can terminate the machine before another step runs.
 
-Detailed command output stays under `$RUNNER_TEMP/private-runner-diagnostics`
-on the ephemeral machine. It is not printed, summarized, or uploaded. DevSpace
-connection material is stored separately under
-`~/private-runner-session/devspace` and is deleted during finalization.
+Detailed command output stays under `$RUNNER_TEMP/private-runner-diagnostics` on
+the ephemeral machine. It is not printed, summarized, or uploaded. Connection
+material is stored separately under `~/private-runner-session` and deleted
+during finalization.
 
 ## Local validation
 
 ```bash
 bash tests/session-lib.test.sh
 bash tests/workflow-security.test.sh
+bash tests/remote-services-security.test.sh
 bash tests/devspace-session.test.sh
+bash tests/t3code-session.test.sh
+bash tests/named-tunnel.test.sh
+bash tests/development-cache.test.sh
+bash tests/startup-optimization.test.sh
 bash -n scripts/*.sh tests/*.sh
 ```
