@@ -11,7 +11,7 @@ MOCK_BIN="$TEMP_ROOT/bin"
 MOCK_HOME="$TEMP_ROOT/home"
 MOCK_RUNNER_TEMP="$TEMP_ROOT/runner-temp"
 TOKEN='0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
-PUBLIC_URL='https://mcp-repo-07.example.com'
+PUBLIC_URL='https://mock-devspace.trycloudflare.com'
 
 fail() {
   printf 'FAIL: %s\n' "$1" >&2
@@ -25,7 +25,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "$MOCK_BIN" "$MOCK_HOME" "$MOCK_RUNNER_TEMP"
+mkdir -p "$MOCK_BIN" "$MOCK_HOME" \
+  "$MOCK_RUNNER_TEMP/private-runner-diagnostics"
+printf '%s\n' "$PUBLIC_URL" \
+  > "$MOCK_RUNNER_TEMP/private-runner-diagnostics/devspace-public-url"
+chmod 0600 "$MOCK_RUNNER_TEMP/private-runner-diagnostics/devspace-public-url"
 
 cat > "$MOCK_BIN/npm" <<'MOCK'
 #!/usr/bin/env bash
@@ -69,7 +73,6 @@ stderr_file="$TEMP_ROOT/stderr"
 PATH="$MOCK_BIN:$PATH" \
 HOME="$MOCK_HOME" \
 RUNNER_TEMP="$MOCK_RUNNER_TEMP" \
-DEVSPACE_PUBLIC_URL="$PUBLIC_URL" \
   bash "$START_SCRIPT" >"$stdout_file" 2>"$stderr_file"
 
 connection_dir="$MOCK_HOME/private-runner-session/devspace"
@@ -78,7 +81,7 @@ connection_file="$connection_dir/connection.txt"
 [[ "$(stat -c '%a' "$connection_file")" == '600' ]] || \
   fail 'connection file permissions are not private'
 grep -Fxq "MCP_URL=$PUBLIC_URL/mcp" "$connection_file" || \
-  fail 'connection file does not contain the fixed MCP URL'
+  fail 'connection file does not contain the Quick Tunnel MCP URL'
 grep -Fxq "OWNER_TOKEN=$TOKEN" "$connection_file" || \
   fail 'connection file does not contain the owner token'
 
