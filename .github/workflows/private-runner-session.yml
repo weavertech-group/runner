@@ -85,8 +85,25 @@ jobs:
         with:
           node-version: 22.23.1
 
+      - name: Restore development environment cache
+        id: development-cache
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.local/share/mise/installs
+            ~/.local/share/mise/shims
+            ~/.cache/ms-playwright
+            ~/go/bin/migrate
+            ~/.local/bin/uv
+            ~/.local/bin/uvx
+            ~/.local/bin/mise
+          key: development-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/development-versions.env') }}
+
       - name: Install development environment
         shell: bash
+        env:
+          DEVELOPMENT_CACHE_HIT: ${{ steps.development-cache.outputs.cache-hit }}
         run: bash scripts/setup-development-environment.sh
 
       - name: Install Codex CLI
@@ -131,6 +148,21 @@ jobs:
         run: |
           bash scripts/install-cloudflared.sh
           bash scripts/start-devspace.sh
+
+      - name: Save development environment cache
+        if: ${{ steps.development-cache.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.local/share/mise/installs
+            ~/.local/share/mise/shims
+            ~/.cache/ms-playwright
+            ~/go/bin/migrate
+            ~/.local/bin/uv
+            ~/.local/bin/uvx
+            ~/.local/bin/mise
+          key: development-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/development-versions.env') }}
 
       - name: Execute
         if: ${{ inputs.enable_ssh }}

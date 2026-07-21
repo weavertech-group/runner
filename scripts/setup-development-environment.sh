@@ -12,6 +12,7 @@ log_file="$diagnostic_dir/development-environment.log"
 temporary_dir="$runner_temp/private-runner-development"
 local_bin="${HOME:?HOME is required}/.local/bin"
 mise_config="$HOME/.config/mise/config.toml"
+development_cache_hit="${DEVELOPMENT_CACHE_HIT:-false}"
 
 fail() {
   printf 'E55\n' >&2
@@ -32,6 +33,31 @@ install_uv() {
   tar -xzf "$uv_archive" --strip-components=1 -C "$uv_dir"
   install -m 0755 "$uv_dir/uv" "$local_bin/uv"
   install -m 0755 "$uv_dir/uvx" "$local_bin/uvx"
+}
+
+install_mise() {
+  curl --fail --silent --show-error --location --retry 3 \
+    --proto '=https' --tlsv1.2 \
+    --output "$temporary_dir/mise-installer.sh" \
+    "https://github.com/jdx/mise/releases/download/${MISE_VERSION}/install.sh"
+  MISE_VERSION="$MISE_VERSION" \
+    MISE_INSTALL_PATH="$local_bin/mise" \
+    MISE_QUIET=1 \
+    sh "$temporary_dir/mise-installer.sh"
+}
+
+mise_cache_ready() {
+  [[ "$development_cache_hit" == true && -x "$local_bin/mise" ]] || return 1
+
+  local tool=''
+  for tool in \
+    "python@${PYTHON_VERSION}" \
+    "go@${GO_VERSION}" \
+    "rust@${RUST_VERSION}" \
+    "terraform@${TERRAFORM_VERSION}" \
+    "opentofu@${OPENTOFU_VERSION}"; do
+    "$local_bin/mise" where "$tool" >/dev/null 2>&1 || return 1
+  done
 }
 
 install_kubernetes_plugins() {
@@ -135,16 +161,12 @@ main() {
   sudo ln -sfn /usr/bin/batcat /usr/local/bin/bat
 
   install -d -m 0700 "$local_bin" "$temporary_dir" "$HOME/.config/mise"
-  install_uv
-
-  curl --fail --silent --show-error --location --retry 3 \
-    --proto '=https' --tlsv1.2 \
-    --output "$temporary_dir/mise-installer.sh" \
-    "https://github.com/jdx/mise/releases/download/${MISE_VERSION}/install.sh"
-  MISE_VERSION="$MISE_VERSION" \
-    MISE_INSTALL_PATH="$local_bin/mise" \
-    MISE_QUIET=1 \
-    sh "$temporary_dir/mise-installer.sh"
+  if [[ "$development_cache_hit" != true || ! -x "$local_bin/uv" || ! -x "$local_bin/uvx" ]]; then
+    install_uv
+  fi
+  if [[ "$development_cache_hit" != true || ! -x "$local_bin/mise" ]]; then
+    install_mise
+  fi
 
   export PATH="$local_bin:$HOME/.local/share/mise/shims:$HOME/go/bin:$PATH"
 
@@ -162,21 +184,26 @@ terraform = "${TERRAFORM_VERSION}"
 opentofu = "${OPENTOFU_VERSION}"
 EOF
   chmod 0600 "$mise_config"
-  MISE_YES=1 \
-    MISE_JOBS=2 \
-    MISE_GITHUB_ATTESTATIONS=true \
-    MISE_AQUA_GITHUB_ATTESTATIONS=true \
-    MISE_PYTHON_GITHUB_ATTESTATIONS=true \
-    mise install
+
+  if ! mise_cache_ready; then
+    MISE_YES=1 \
+      MISE_JOBS=2 \
+      MISE_GITHUB_ATTESTATIONS=true \
+      MISE_AQUA_GITHUB_ATTESTATIONS=true \
+      MISE_PYTHON_GITHUB_ATTESTATIONS=true \
+      mise install
+  fi
   mise reshim
 
   npm install --global --no-audit --no-fund \
     "@playwright/test@${PLAYWRIGHT_VERSION}"
   playwright install --with-deps chromium
 
-  CGO_ENABLED=1 mise exec "go@${GO_VERSION}" -- \
-    go install -tags 'postgres mysql sqlite3' \
-    "github.com/golang-migrate/migrate/v4/cmd/migrate@v${MIGRATE_VERSION}"
+  if [[ "$development_cache_hit" != true || ! -x "$HOME/go/bin/migrate" ]]; then
+    CGO_ENABLED=1 mise exec "go@${GO_VERSION}" -- \
+      go install -tags 'postgres mysql sqlite3' \
+      "github.com/golang-migrate/migrate/v4/cmd/migrate@v${MIGRATE_VERSION}"
+  fi
 
   install_kubernetes_plugins
   install -m 0755 "$ROOT_DIR/scripts/bootstrap-project.sh" \
