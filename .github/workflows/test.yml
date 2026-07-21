@@ -34,6 +34,10 @@ jobs:
         shell: bash
         run: bash tests/development-cache.test.sh
 
+      - name: Test startup optimization
+        shell: bash
+        run: bash tests/startup-optimization.test.sh
+
       - name: Check shell syntax
         shell: bash
         run: bash -n scripts/*.sh tests/*.sh
