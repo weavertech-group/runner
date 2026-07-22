@@ -1,3 +1,0 @@
-# Test-only allowlist.
-repo-07 session--repo-07
-repo-12 session--repo-12

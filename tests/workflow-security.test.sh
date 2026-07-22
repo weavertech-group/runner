@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# Contract checks for public-repo safety and signed Lark reporting.
+# These are policy assertions over workflow YAML, not behavioral tests.
+# Implementation details (installer URLs, package versions) belong elsewhere.
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+WORKFLOW="$ROOT_DIR/.github/workflows/private-runner-session.yml"
+TOOLS_ACTION="$ROOT_DIR/.github/actions/development-tools/action.yml"
+NETWORK_ACTION="$ROOT_DIR/.github/actions/private-network/action.yml"
+T3_ACTION="$ROOT_DIR/.github/actions/t3-session/action.yml"
+
+fail() {
+  printf 'FAIL: %s\n' "$1" >&2
+  exit 1
+}
+
+[[ -f "$WORKFLOW" ]] || fail "missing workflow: $WORKFLOW"
+for action in "$TOOLS_ACTION" "$NETWORK_ACTION" "$T3_ACTION"; do
+  [[ -f "$action" ]] || fail "missing composite action: $action"
+done
+
+# Must deliver lifecycle events through the signed reporter, never ad-hoc curl.
+grep -Fq 'python3 scripts/report-lark.py starting' "$WORKFLOW" || \
+  fail 'missing starting Lark report'
+grep -Fq 'python3 scripts/report-lark.py service-online' "$T3_ACTION" || \
+  fail 'missing service-online Lark report'
+grep -Fq 'python3 scripts/report-lark.py offline' "$WORKFLOW" || \
+  fail 'missing offline Lark report'
+grep -Fq 'LARK_REPORTING_ENABLED' "$WORKFLOW" || \
+  fail 'workflow must honor LARK_REPORTING_ENABLED'
+grep -Fq 'LARK_WEBHOOK_SECRET' "$WORKFLOW" || \
+  fail 'workflow must pass LARK_WEBHOOK_SECRET for signed Lark delivery'
+grep -Fq 'secrets.LARK_WEBHOOK_URL' "$WORKFLOW" || \
+  fail 'workflow must pass LARK_WEBHOOK_URL as a secret'
+
+# Pairing material stays in private session files and is masked if echoed.
+grep -Eq 't3code/pairing-url|SESSION_DIR/t3code/pairing-url' "$T3_ACTION" || \
+  fail 'missing private pairing-url file write'
+grep -Fq '::add-mask::' "$T3_ACTION" || \
+  fail 'missing Actions masking for pairing material'
+
+# The environment is intentionally direct and declarative: no cache/bootstrap
+# script should hide tool installation or pin a second toolchain.
+if rg -q 'setup-development-environment|development-versions|runner-bootstrap|prepare-development-cache' \
+  "$WORKFLOW" "$ROOT_DIR/.github/actions"; then
+  fail 'workflow still delegates development environment setup to legacy scripts'
+fi
+
+grep -Fq 'https://chatgpt.com/codex/install.sh' "$TOOLS_ACTION" || \
+  fail 'missing official Codex installer'
+grep -Fq 'https://claude.ai/install.sh' "$TOOLS_ACTION" || \
+  fail 'missing official Claude Code installer'
+grep -Fq 'npx --yes t3@latest serve' "$T3_ACTION" || \
+  fail 'missing latest T3 Code entrypoint'
+grep -Fq 'https://pkg.cloudflare.com/cloudflared noble main' "$T3_ACTION" || \
+  fail 'missing official cloudflared package repository'
+grep -Fq 'apt-get install -y -qq cloudflared' "$T3_ACTION" || \
+  fail 'missing cloudflared package install'
+grep -Fq -- '--ssh' "$NETWORK_ACTION" || \
+  fail 'private network must enable Tailscale SSH'
+
+if rg -q 'openssh-server|sshd_config|ssh-public-key|ssh_public_key' \
+  "$WORKFLOW" "$ROOT_DIR/.github/actions"; then
+  fail 'OpenSSH fallback must not return'
+fi
+
+if rg -q 'pairing_token|app[.]t3[.]codes/pair[?]host|/pair#token=' \
+  "$WORKFLOW" "$ROOT_DIR/.github/actions"; then
+  fail 'workflow must not reconstruct T3 pairing URLs'
+fi
+
+# Public repository: never publish pairing material, private repo names, or
+# token-bearing service logs through Actions-visible channels.
+if rg -q 'GITHUB_STEP_SUMMARY' "$WORKFLOW" "$ROOT_DIR/.github/actions"; then
+  fail 'workflow writes GitHub step summary (public on public repos)'
+fi
+
+if rg -q 'echo "\$t3_link"|echo "\$pairing_|echo "\$client_pair|echo "T3 Code link:' \
+  "$WORKFLOW" "$ROOT_DIR/.github/actions"; then
+  fail 'workflow prints T3 pairing material to Actions output'
+fi
+
+if rg -q 'cat "\$t3_log"|cat "\$tunnel_log"' "$WORKFLOW" "$ROOT_DIR/.github/actions"; then
+  fail 'workflow dumps service logs that can contain pairing tokens'
+fi
+
+if rg -q 'msg_type:[[:space:]]*"interactive"|msg_type: "interactive"' \
+  "$WORKFLOW" "$ROOT_DIR/.github/actions"; then
+  fail 'workflow must not send unsigned inline Lark interactive payloads'
+fi
+
+if rg -q 'curl[^\n]*\$LARK_WEBHOOK_URL|curl[^\n]*"\$LARK_WEBHOOK_URL"' \
+  "$WORKFLOW" "$ROOT_DIR/.github/actions"; then
+  fail 'workflow must not curl the Lark webhook directly'
+fi
+
+printf '%s\n' 'workflow security contract tests passed'

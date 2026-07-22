@@ -8,312 +8,61 @@ on:
         required: true
         type: environment
       enable_ssh:
-        description: Enable Headscale/Tailscale access
         default: false
         type: boolean
       non_durable:
-        description: Finish after sending the T3 link
         default: false
         type: boolean
-      ssh_public_key:
-        description: Optional OpenSSH public key; if omitted and SSH is enabled, use Tailscale SSH
-        required: false
-        type: string
-
 run-name: Private T3 session · ${{ inputs.environment }}
 
 permissions:
   contents: read
 
-defaults:
-  run:
-    shell: bash
-
 jobs:
   session:
-    name: Session
     runs-on: ubuntu-24.04
-    environment:
-      name: ${{ inputs.environment }}
+    environment: ${{ inputs.environment }}
+    env:
+      WORKSPACE: ${{ github.workspace }}/target-workspace
+      SESSION_TARGET_ID: ${{ inputs.environment }}
+      LARK_REPORTING_ENABLED: ${{ vars.LARK_REPORTING_ENABLED }}
+      LARK_WEBHOOK_INCLUDE_TEMPORARY_ACCESS: ${{ vars.LARK_WEBHOOK_INCLUDE_TEMPORARY_ACCESS }}
+      LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
+      LARK_WEBHOOK_SECRET: ${{ secrets.LARK_WEBHOOK_SECRET }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
 
-      - name: Define paths
-        run: |
-          set -euo pipefail
+      - run: python3 scripts/report-lark.py starting
 
-          {
-            echo "WORKSPACE=$RUNNER_TEMP/workspace"
-            echo "SESSION_DIR=$HOME/private-runner-session"
-          } >> "$GITHUB_ENV"
+      - uses: ./.github/actions/development-tools
 
-      - name: Install development tools
+      - if: ${{ inputs.enable_ssh }}
+        uses: ./.github/actions/private-network
+        with:
+          headscale-url: ${{ secrets.HEADSCALE_URL }}
+          auth-key: ${{ secrets.HEADSCALE_AUTHKEY }}
+
+      - if: ${{ inputs.enable_ssh }}
         env:
-          CODEX_NON_INTERACTIVE: "1"
-        run: |
-          set -euo pipefail
+          SESSION_SSH_ONLINE: "true"
+          SESSION_RUNNER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}
+        run: python3 scripts/report-lark.py ssh-online
 
-          if [[ -x scripts/setup-development-environment.sh ]]; then
-            bash scripts/setup-development-environment.sh
-          fi
+      - uses: ./.github/actions/t3-session
+        with:
+          repository: ${{ secrets.TARGET_REPO }}
+          token: ${{ secrets.TARGET_REPO_AUTH }}
+          non-durable: ${{ inputs.non_durable }}
+          ssh-online: ${{ inputs.enable_ssh }}
 
-          curl -fsSL https://chatgpt.com/codex/install.sh | sh
-          curl -fsSL https://claude.ai/install.sh | bash
-
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          export PATH="$HOME/.local/bin:$PATH"
-
-          command -v codex
-          command -v claude
-
-          codex --version
-          claude --version
-
-      - name: Start OpenSSH
-        if: ${{ inputs.enable_ssh && inputs.ssh_public_key != '' }}
+      - if: ${{ always() }}
         env:
-          SSH_PUBLIC_KEY: ${{ inputs.ssh_public_key }}
-        run: |
-          set -euo pipefail
-
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq openssh-server
-
-          install -d -m 0700 "$HOME/.ssh"
-          printf '%s\n' "$SSH_PUBLIC_KEY" >> "$HOME/.ssh/authorized_keys"
-          chmod 600 "$HOME/.ssh/authorized_keys"
-
-          sudo systemctl enable --now ssh
-
-      - name: Join Headscale
-        if: ${{ inputs.enable_ssh }}
-        env:
-          HEADSCALE_URL: ${{ secrets.HEADSCALE_URL }}
-          HEADSCALE_AUTHKEY: ${{ secrets.HEADSCALE_AUTHKEY }}
-          SSH_PUBLIC_KEY: ${{ inputs.ssh_public_key }}
-        run: |
-          set -euo pipefail
-
-          : "${HEADSCALE_URL:?HEADSCALE_URL is required when SSH is enabled}"
-          : "${HEADSCALE_AUTHKEY:?HEADSCALE_AUTHKEY is required when SSH is enabled}"
-
-          curl -fsSL https://tailscale.com/install.sh | sh
-
-          ts_args=(
-            --login-server="$HEADSCALE_URL"
-            --auth-key="$HEADSCALE_AUTHKEY"
-            --hostname="gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-            --accept-dns=false
-          )
-
-          [[ -n "$SSH_PUBLIC_KEY" ]] || ts_args+=(--ssh)
-
-          sudo tailscale up "${ts_args[@]}"
-
-      - name: Configure repository access
-        env:
-          TARGET_REPO: ${{ secrets.TARGET_REPO }}
-          TARGET_REPO_AUTH: ${{ secrets.TARGET_REPO_AUTH }}
-        run: |
-          set -euo pipefail
-
-          : "${TARGET_REPO:?TARGET_REPO is required}"
-          : "${TARGET_REPO_AUTH:?TARGET_REPO_AUTH is required}"
-
-          git config --global credential.https://github.com.useHttpPath true
-          git config --global credential.helper "store --file=$RUNNER_TEMP/target-repo-credential"
-
-          printf 'protocol=https\nhost=github.com\npath=%s.git\nusername=x-access-token\npassword=%s\n\n' \
-            "$TARGET_REPO" \
-            "$TARGET_REPO_AUTH" \
-            | git credential approve
-
-      - name: Clone repository
-        env:
-          TARGET_REPO: ${{ secrets.TARGET_REPO }}
-        run: |
-          set -euo pipefail
-
-          git clone "https://github.com/${TARGET_REPO}.git" "$WORKSPACE"
-
-      - name: Install cloudflared
-        run: |
-          set -euo pipefail
-
-          sudo curl -fsSL \
-            -o /usr/local/bin/cloudflared \
-            https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
-
-          sudo chmod +x /usr/local/bin/cloudflared
-          cloudflared --version
-
-      - name: Start T3 Code
-        env:
-          ENVIRONMENT_NAME: ${{ inputs.environment }}
-          TARGET_REPO: ${{ secrets.TARGET_REPO }}
-          NON_DURABLE: ${{ inputs.non_durable }}
-          LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
-        run: |
-          set -euo pipefail
-
-          : "${LARK_WEBHOOK_URL:?LARK_WEBHOOK_URL is required}"
-
-          install -d -m 0700 "$SESSION_DIR/t3code"
-
-          t3_log="$RUNNER_TEMP/t3code.log"
-          tunnel_log="$RUNNER_TEMP/cloudflared.log"
-
-          npx --yes t3@latest serve \
-            --host 127.0.0.1 \
-            --port 3773 \
-            "$WORKSPACE" \
-            > "$t3_log" 2>&1 &
-
-          t3_pid="$!"
-
-          cloudflared tunnel --url http://127.0.0.1:3773 \
-            > "$tunnel_log" 2>&1 &
-
-          tunnel_pid="$!"
-
-          backend_url=""
-          pairing_token=""
-
-          for _ in {1..30}; do
-            backend_url="$(
-              sed -nE 's#.*(https://[-a-z0-9]+[.]trycloudflare[.]com).*#\1#p' "$tunnel_log" |
-              head -n1
-            )"
-
-            pairing_token="$(
-              sed -nE 's/^.*Token:[[:space:]]*([^[:space:]]+).*$/\1/p' "$t3_log" |
-              head -n1
-            )"
-
-            if [[ -n "$backend_url" && -n "$pairing_token" ]]; then
-              break
-            fi
-
-            if ! kill -0 "$t3_pid" 2>/dev/null; then
-              echo "T3 Code exited before producing pairing information." >&2
-              cat "$t3_log" >&2
-              exit 1
-            fi
-
-            if ! kill -0 "$tunnel_pid" 2>/dev/null; then
-              echo "cloudflared exited before producing a tunnel URL." >&2
-              cat "$tunnel_log" >&2
-              exit 1
-            fi
-
-            sleep 1
-          done
-
-          if [[ -z "$backend_url" || -z "$pairing_token" ]]; then
-            echo "Failed to create T3 link." >&2
-            echo
-            echo "cloudflared log:" >&2
-            cat "$tunnel_log" >&2
-            echo
-            echo "T3 Code log:" >&2
-            cat "$t3_log" >&2
-            exit 1
-          fi
-
-          t3_link="$(
-            node -e '
-              const host = encodeURIComponent(process.argv[1]);
-              const token = encodeURIComponent(process.argv[2]);
-              console.log(`https://app.t3.codes/pair?host=${host}#token=${token}`);
-            ' "$backend_url" "$pairing_token"
-          )"
-
-          printf '%s\n' "$backend_url" > "$SESSION_DIR/t3code/backend-url"
-          printf '%s\n' "$pairing_token" > "$SESSION_DIR/t3code/pairing-token"
-          printf '%s\n' "$t3_link" > "$SESSION_DIR/t3code/link"
-          chmod 600 "$SESSION_DIR/t3code/backend-url" "$SESSION_DIR/t3code/pairing-token" "$SESSION_DIR/t3code/link"
-
-          {
-            echo "### T3 Code"
-            echo
-            echo "**Environment:** \`$ENVIRONMENT_NAME\`"
-            echo
-            echo "**Repository:** \`$TARGET_REPO\`"
-            echo
-            echo "[Open T3 Code]($t3_link)"
-            echo
-            echo '```text'
-            echo "$t3_link"
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-          payload="$(
-            T3_LINK="$t3_link" \
-            ENVIRONMENT_NAME="$ENVIRONMENT_NAME" \
-            TARGET_REPO="$TARGET_REPO" \
-            RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
-            node <<'NODE'
-          const payload = {
-            msg_type: "interactive",
-            card: {
-              header: {
-                title: {
-                  tag: "plain_text",
-                  content: "T3 Code ready"
-                }
-              },
-              elements: [
-                {
-                  tag: "div",
-                  text: {
-                    tag: "lark_md",
-                    content: `**Environment:** ${process.env.ENVIRONMENT_NAME}`
-                  }
-                },
-                {
-                  tag: "div",
-                  text: {
-                    tag: "lark_md",
-                    content: `**Repository:** ${process.env.TARGET_REPO}`
-                  }
-                },
-                {
-                  tag: "div",
-                  text: {
-                    tag: "lark_md",
-                    content: `[Open T3 Code](${process.env.T3_LINK})`
-                  }
-                },
-                {
-                  tag: "div",
-                  text: {
-                    tag: "lark_md",
-                    content: `[GitHub Actions run](${process.env.RUN_URL})`
-                  }
-                }
-              ]
-            }
-          };
-
-          console.log(JSON.stringify(payload));
-          NODE
-          )"
-
-          curl -fsS \
-            -H 'Content-Type: application/json' \
-            -d "$payload" \
-            "$LARK_WEBHOOK_URL"
-
-          echo "T3 Code link:"
-          echo "$t3_link"
-
-          if [[ "$NON_DURABLE" != "true" ]]; then
-            sleep infinity
-          fi
+          SESSION_SSH_ONLINE: "false"
+        run: python3 scripts/report-lark.py offline

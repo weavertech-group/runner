@@ -1,249 +1,93 @@
-# Private GitHub Actions runner session
+# Private T3 session
 
-This public repository starts an ephemeral GitHub-hosted Ubuntu runner, joins it
-to a private Headscale network, and keeps it available over Tailscale SSH. The
-runner has no public SSH listener. An optional opaque target ID selects exactly
-one GitHub Environment without exposing the private repository name.
+This public repository starts a one-time GitHub-hosted Ubuntu runner for a
+private repository, optionally joins it to Headscale, and serves that checkout
+through T3 Code and a temporary Cloudflare Quick Tunnel.
 
-By default, the workflow is only a secure network/SSH handoff. Explicit
-`enable_devspace` and `enable_t3code` options can additionally clone the selected
-target repository once, start DevSpace MCP and/or T3 Code, and expose each
-service through its own temporary Cloudflare Quick Tunnel. It does not run issue
-agents, create pull requests, or implement a task queue.
+The workflow is deliberately declarative and happy-path:
 
-For repeatable setup and operation, use the
-[operations runbook](docs/runner-operations-runbook.md). Optional public services
-are documented in the [DevSpace session guide](docs/devspace-session.md) and
-[T3 Code session guide](docs/t3code-session.md). This README describes the design
-invariants.
+- Codex uses its official standalone installer.
+- Claude Code uses its official native installer.
+- T3 Code runs with `npx --yes t3@latest`.
+- cloudflared uses Cloudflare's official package repository and system default
+  install location.
+- Tailscale uses its official Linux installer.
 
-## What is implemented
+The main workflow declares the session in three local composite actions:
+development tools, private network, and T3 session. There is
+no development-tool cache, fixed multi-language bootstrap, custom tool home, or
+shell wrapper for these commands. Target-project dependencies remain the target
+project's responsibility after connection and should follow that project's own
+documentation.
 
-- Unique node name: `gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}`.
-- Tailscale installed by its official Linux installer.
-- Headscale URL override and Tailscale SSH without changing runner DNS.
-- Optional Ed25519 public-key mode using system OpenSSH on the tailnet only.
-- Public opaque-ID allowlist and one GitHub Environment per target repository.
-- Independent workflow sessions, including concurrent sessions for one target.
-- A path-scoped Git credential store for the selected repository only.
-- One shared target working tree for SSH, DevSpace, T3 Code, Codex, and Claude.
-- Optional current DevSpace via `npx`.
-- Optional current T3 Code via `npx`, bound to `127.0.0.1:3773`.
-- Current cloudflared binary for temporary Quick Tunnels.
-- One anonymous Quick Tunnel process and random HTTPS URL per enabled service.
-- Connection URLs and credentials stored only in mode-`0600` local files.
-- Native command output in the Actions log; no custom error-code layer.
+## Configure a session Environment
 
-## Required administrator setup
+Create a protected GitHub Environment for each target repository. Its name is
+visible in the Actions UI, so use a non-sensitive identifier. Configure these
+Environment secrets:
 
-### 1. Configure Headscale
+| Secret | Purpose |
+| --- | --- |
+| `TARGET_REPO` | Private repository in `owner/repository` form |
+| `TARGET_REPO_AUTH` | Token restricted to that repository |
+| `HEADSCALE_AUTHKEY` | Tagged ephemeral Headscale/Tailscale auth key, when SSH is enabled |
 
-Merge [the config example](headscale/config.example.yaml) into the deployed
-Headscale configuration. The public control URL and MagicDNS base domain must
-be different DNS names. Validate and restart using commands appropriate to the
-installed Headscale version, for example:
+Configure `HEADSCALE_URL` as a repository or Environment secret when SSH is
+enabled. The workflow only accepts `workflow_dispatch`, has read-only GitHub
+token permissions, and uses a path-scoped temporary Git credential store.
 
-```bash
-headscale configtest
-sudo systemctl restart headscale
-```
+Optional Lark reporting requires `LARK_REPORTING_ENABLED=true` and the
+`LARK_WEBHOOK_URL` and `LARK_WEBHOOK_SECRET` secrets. See
+[Lark reporting](docs/lark-reporting.md).
 
-Deploy a private copy of [the policy example](headscale/policy.example.hujson).
-Replace the example identity with the real team group. Do not publish the real
-policy here because member identities can be sensitive.
+Protect both the default branch and every session Environment. In particular,
+restrict Environment deployment branches and require reviewers before granting
+secrets to workflow runs.
 
-Adding a non-empty `grants` array changes the tailnet from Headscale's implicit
-allow-all behavior to explicit authorization. Before enabling it, inventory
-existing personal-node traffic and subnet routes and add grants for the traffic
-that must remain available. The example preserves full connectivity between
-members of `group:platform-admins`; add explicit CIDR destinations for any
-existing subnet routes.
-
-The policy example also enables the `magicdns-aaaa` node attribute. Keep this
-for clients that choose to use MagicDNS when the Headscale IPv6 pool is enabled.
-Runner sessions and workstations that coexist with Quantumult X do not install
-these DNS settings into the operating system.
-
-The example additionally uses `hosts` aliases to apply the official
-`disable-ipv4` node attribute only to the macOS devices that coexist with
-Quantumult X and to `tag:gha-runner`. Replace the example host addresses with
-those devices' current Headscale IPv4 addresses before deploying the policy.
-This makes their Tailnet path IPv6-only: Quantumult X keeps ownership of IPv4
-and system DNS, while Tailscale avoids the conflicting `100.64.0.0/10` range.
-
-Create a dedicated tagged, reusable, ephemeral, pre-authorized key. Confirm the
-flags against the installed version:
-
-```bash
-headscale preauthkeys create --help
-headscale preauthkeys create \
-  --user gha \
-  --reusable \
-  --ephemeral \
-  --tags tag:gha-runner \
-  --expiration 720h
-```
-
-Team workstations must join the same Headscale network and be included in
-`group:platform-admins` (or the replacement group). A workstation that coexists
-with Quantumult X must join with `--accept-dns=false` so Quantumult X remains the
-only manager of system DNS.
-
-Give each person a separate Headscale user. On Headscale versions without a
-node-owner transfer command, an existing device must reauthenticate under its
-new user. Migrate ordinary clients first and subnet routers last, because a
-re-registered subnet router may need its advertised routes approved again. Use
-a short-lived, non-reusable key for one device at a time:
-
-```bash
-headscale users create MEMBER
-headscale preauthkeys create --user MEMBER_ID --expiration 24h
-```
-
-After the member reconnects, verify the node owner, MagicDNS name, peer access,
-and any routes before deleting or expiring the old node record.
-
-### 2. Configure repository settings
-
-Create this repository-level Actions secret. The URL is sensitive metadata
-rather than an authentication credential, but storing it as a secret gives it
-the same automatic log masking as other Actions secrets.
-
-| Kind | Name | Value |
-| --- | --- | --- |
-| Secret | `HEADSCALE_URL` | The externally reachable HTTPS control URL |
-
-Do not create repository-level target or Headscale authentication credentials.
-Create a GitHub Environment named `session--none` containing only Environment
-secret `HEADSCALE_AUTHKEY`. The workflow uses this Environment when no target is
-selected.
-
-For each allowed repository:
-
-1. Allocate a public opaque ID such as `repo-07`.
-2. Create an Environment such as `session--repo-07`.
-3. Add these Environment secrets:
-
-   | Secret | Value |
-   | --- | --- |
-   | `HEADSCALE_AUTHKEY` | The tagged ephemeral preauth key |
-   | `TARGET_REPO` | The real private `owner/repository` name |
-   | `TARGET_REPO_AUTH` | A token limited to that repository |
-
-4. Add only the opaque mapping to
-   [.github/target-repositories.txt](.github/target-repositories.txt):
-
-   ```text
-   repo-07 session--repo-07
-   ```
-
-Cloudflare account credentials, DNS records, custom hostnames, and persistent
-connector resources are not required. Quick Tunnel URLs are allocated
-anonymously by `cloudflared` during each workflow run.
-
-Never put a real private repository name in the public allowlist, Environment
-name, workflow input, run name, or step name. The resolver rejects opaque IDs
-not in the allowlist before the credential-bearing job starts.
-
-For every session Environment, restrict deployment branches to the protected
-default branch, enable required reviewers where appropriate, and disable admin
-bypass. The workflow also sets `deployment: false`, so using Environment secrets
-does not create a public deployment record.
-
-### 3. Protect the public repository
-
-The included [CODEOWNERS](.github/CODEOWNERS) assigns the current maintainer to
-workflow, network, and allowlist changes. Replace or extend `@bef0rewind` with
-the actual security review team. Then configure a default-branch ruleset that:
-
-- requires a pull request and CODEOWNER approval;
-- blocks force pushes and branch deletion;
-- restricts who can push;
-- requires approval for changes under `.github/workflows/**` if supported by the
-  organization's ruleset setup.
-
-Do not add `pull_request_target`, do not run fork-provided code in this workflow,
-and keep every external Action pinned to a full commit SHA. Workflow dispatch
-inputs and run metadata in this public repository must be treated as public.
+When SSH is enabled, configure Headscale using the repository's
+[config example](headscale/config.example.yaml) and
+[policy example](headscale/policy.example.hujson). They are fragments to merge
+into the deployed configuration, not drop-in production files. Replace the
+example identities and addresses, then validate all fields against the deployed
+Headscale version. The policy should only permit trusted administrators to reach
+tagged runners over Tailscale SSH.
 
 ## Start and connect
 
-From the Actions UI, choose **Private Runner Session** and dispatch it. The
-optional `target_id` value must match the opaque allowlist. Leave
-`ssh_public_key` empty for the default Tailscale SSH mode.
-
-The node name is:
-
-```text
-gha-<run-id>-<run-attempt>
-```
-
-On macOS workstations that run Quantumult X, use the Homebrew/open-source
-`tailscaled` client and prevent it from changing system DNS:
-
-```bash
-sudo tailscale set --accept-dns=false
-```
-
-Connect through the Tailscale CLI. It resolves the node from the local daemon
-even when system DNS integration is disabled. The `disable-ipv4` policy makes
-the selected workstation and runner use their conflict-free Tailnet IPv6
-addresses automatically:
+Dispatch **Private T3 Session**, select the session Environment, and set
+`enable_ssh=true` when private shell access is needed. The runner uses
+Tailscale SSH:
 
 ```bash
 tailscale ssh runner@gha-<run-id>-<run-attempt>
 ```
 
-Do not enable **Use Tailscale DNS settings**, add a Quantumult X DNS override,
-create `/etc/resolver` entries, or pin ephemeral runner addresses in
-`~/.ssh/config`. Headscale MagicDNS remains enabled for other clients that want
-it; these workstations and the GitHub-hosted runner simply decline its system
-DNS configuration.
+Private connection data is mode `0600` under:
 
-When a target is selected, Git is configured from protected Environment secrets
-and returns the token only for that repository path. An authorized operator can
-clone the internally known repository without putting a token in the command
-line:
-
-```bash
-git clone https://github.com/<owner>/<repository>.git
+```text
+~/private-runner-session/t3code/connection.txt
 ```
 
-To start an optional service, select a non-empty `target_id`, keep `enable_ssh`
-enabled, and set `enable_devspace`, `enable_t3code`, or both to `true`. The
-workflow clones the target once and shares the working tree between services.
-When both services are enabled, each receives a separate random Quick Tunnel URL.
-
-Read private connection details over SSH:
-
-```bash
-cat ~/private-runner-session/devspace/connection.txt
-cat ~/private-runner-session/t3code/connection.txt
-```
-
-The URLs change on every workflow run and stop working when that runner session
-ends. Old client entries must be updated with the newly generated URL or pairing
-link.
-
-Supplying `ssh_public_key` writes the key to `authorized_keys` and starts the
-session without Tailscale SSH. Otherwise, use Tailscale SSH.
-
-The session step waits indefinitely, so the runner stays online until GitHub
-enforces its hosted-job limit. Setup time is part of that limit. Ending or
-cancelling the workflow destroys the GitHub-hosted runner and its local
-connection files.
+The file records the Cloudflare public origin and the pairing URL emitted by
+T3 itself. The workflow never constructs, rewrites, or publishes pairing URLs.
+If external pairing requires an explicit public origin, use the upstream T3
+configuration intended for that purpose instead of rewriting its output.
+The Quick Tunnel URL and all runner state disappear when the session ends.
 
 ## Failure behavior
 
-The workflow deliberately follows the happy path. Commands fail with their
-native exit status and output; it does not translate failures into repository
-specific error codes, retry operations, diagnostic artifacts, or separate
-readiness checks.
+The workflow models the happy path. Commands keep their native output and exit
+status. It has no retry, fallback installer, cache restore, custom error code,
+or diagnostic-artifact layer.
 
 ## Local validation
 
 ```bash
-bash tests/happy-path-workflow.test.sh
-bash tests/lark-webhook.test.sh
-bash -n scripts/*.sh scripts/lib/*.sh tests/*.sh
+bash tests/workflow-security.test.sh
+python3 tests/report_lark_test.py
+shellcheck --severity=bash tests/*.sh
+actionlint
 ```
+
+See the [operations runbook](docs/runner-operations-runbook.md) for the concise
+operator flow and [SECURITY.md](SECURITY.md) for the current trust model.

@@ -17,14 +17,28 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Test happy-path workflow
+      - name: Install shellcheck and actionlint
         shell: bash
-        run: bash tests/happy-path-workflow.test.sh
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7
+          shellcheck --version
+          ./actionlint -version
 
-      - name: Test Lark Webhook foundation
+      - name: Lint GitHub Actions workflows
         shell: bash
-        run: bash tests/lark-webhook.test.sh
+        run: ./actionlint -color
 
-      - name: Check shell syntax
+      - name: ShellCheck scripts and tests
         shell: bash
-        run: bash -n scripts/*.sh scripts/lib/*.sh tests/*.sh
+        run: shellcheck --severity=bash tests/*.sh
+
+      - name: Test workflow security contract
+        shell: bash
+        run: bash tests/workflow-security.test.sh
+
+      - name: Test Lark Webhook
+        shell: bash
+        run: python3 tests/report_lark_test.py
