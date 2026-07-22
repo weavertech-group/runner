@@ -11,6 +11,16 @@ function response(body) {
   return { json: async () => body };
 }
 
+function cardFields(card) {
+  return card.body.elements.find(({ fields }) => fields).fields;
+}
+
+function cardActions(card) {
+  return card.body.elements
+    .find(({ tag }) => tag === "column_set")
+    .columns.map(({ elements }) => elements[0]);
+}
+
 async function actionEnvironment(status) {
   const directory = await mkdtemp(join(tmpdir(), "lark-session-"));
   const environmentFile = join(directory, "github-env");
@@ -82,7 +92,26 @@ test("starting creates one card in the exact chat and saves its message id", asy
   const sent = JSON.parse(requests[3].options.body);
   assert.equal(sent.receive_id, "oc_runner");
   assert.equal(sent.msg_type, "interactive");
-  assert.match(JSON.parse(sent.content).body.elements[0].content, /Starting/);
+  const card = JSON.parse(sent.content);
+  assert.equal(card.header.template, "blue");
+  assert.equal(card.header.title.content, "🚀 Private T3 session");
+  assert.match(card.body.elements[0].content, /<text_tag color='blue'>STARTING<\/text_tag>/);
+  assert.deepEqual(
+    cardFields(card).map(({ text }) => text.content),
+    [
+      "**Target**\nrepo-01",
+      "**Run**\n#123456",
+      "**Attempt**\n2",
+      "**Access**\nPreparing",
+    ],
+  );
+  assert.equal(card.body.elements[2].tag, "column_set");
+  assert.deepEqual(
+    cardActions(card).map(({ elements }) => elements[0].text.content),
+    ["View GitHub run"],
+  );
+  assert.equal(card.body.elements[3].tag, "div");
+  assert.equal(card.body.elements[3].text.text_size, "notation");
   assert.equal(await readFile(context.environment.GITHUB_ENV, "utf8"), "LARK_MESSAGE_ID=om_session\n");
   assert.equal(await readFile(context.environment.GITHUB_STATE, "utf8"), "message_id=om_session\n");
   await rm(context.directory, { recursive: true });
@@ -110,9 +139,26 @@ test("online updates the existing card without registering another cleanup", asy
   );
   assert.equal(requests[1].options.method, "PATCH");
   const updated = JSON.parse(requests[1].options.body);
-  const markdown = JSON.parse(updated.content).body.elements[0].content;
-  assert.match(markdown, /Online/);
-  assert.match(markdown, /https:\/\/runner[.]trycloudflare[.]com/);
+  const card = JSON.parse(updated.content);
+  assert.equal(card.header.template, "green");
+  assert.equal(card.header.title.content, "✅ T3 session ready");
+  assert.match(card.body.elements[0].content, /<text_tag color='green'>ONLINE<\/text_tag>/);
+  assert.deepEqual(
+    cardFields(card).map(({ text }) => text.content),
+    [
+      "**Target**\nrepo-01",
+      "**Run**\n#123456",
+      "**SSH host**\nNot available",
+      "**Attempt**\n2",
+    ],
+  );
+  const actions = cardActions(card);
+  assert.deepEqual(actions.map(({ elements }) => elements[0].text.content), [
+    "Open T3 Code",
+    "View GitHub run",
+  ]);
+  assert.equal(actions[0].background_style, "green");
+  assert.equal(actions[0].behaviors[0].default_url, "https://runner.trycloudflare.com");
   assert.equal(await readFile(context.environment.GITHUB_STATE, "utf8"), "");
   await cleanup(context.environment, fetch);
   assert.equal(requests.length, 2);
@@ -138,8 +184,23 @@ test("post updates the owning card to Offline and omits temporary access", async
     "https://open.larksuite.com/open-apis/im/v1/messages/om_session",
   );
   const updated = JSON.parse(requests[1].options.body);
-  const markdown = JSON.parse(updated.content).body.elements[0].content;
-  assert.match(markdown, /Offline/);
-  assert.doesNotMatch(markdown, /trycloudflare/);
+  const card = JSON.parse(updated.content);
+  assert.equal(card.header.template, "grey");
+  assert.equal(card.header.title.content, "⏹️ T3 session offline");
+  assert.match(card.body.elements[0].content, /<text_tag color='neutral'>OFFLINE<\/text_tag>/);
+  assert.deepEqual(
+    cardFields(card).map(({ text }) => text.content),
+    [
+      "**Target**\nrepo-01",
+      "**Run**\n#123456",
+      "**Attempt**\n2",
+      "**Access**\nRemoved",
+    ],
+  );
+  assert.deepEqual(
+    cardActions(card).map(({ elements }) => elements[0].text.content),
+    ["View GitHub run"],
+  );
+  assert.doesNotMatch(JSON.stringify(card), /trycloudflare/);
   await rm(context.directory, { recursive: true });
 });

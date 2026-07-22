@@ -37,6 +37,10 @@ The Online card includes the temporary T3 origin but not its pairing URL. The
 Offline card removes temporary access. Neither value is written to Actions logs
 or step summaries.
 
+The payload uses Lark card JSON 2.0 throughout. Its links are JSON 2.0
+interactive containers and its footnote is notation text; the legacy `action`
+and `note` elements are not valid in this schema.
+
 This cleanup is best-effort. It covers normal completion, step failure, and
 cooperative cancellation while the runner can still execute action teardown. A
 runner that disappears or loses network cannot update the card; detecting that

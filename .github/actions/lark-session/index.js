@@ -5,22 +5,124 @@ const API = "https://open.larksuite.com/open-apis";
 
 function card(status, environment) {
   const runUrl = `${environment.GITHUB_SERVER_URL}/${environment.GITHUB_REPOSITORY}/actions/runs/${environment.GITHUB_RUN_ID}`;
-  const content = [
-    `**Status:** ${status}`,
-    `**Target:** ${environment.SESSION_TARGET_ID}`,
-    ...(status === "Online" ? [`**T3:** ${environment.SESSION_T3_URL}`] : []),
-    ...(status === "Online" ? [`**SSH:** ${environment.SESSION_SSH_ONLINE}`] : []),
-    `**Run:** [${environment.GITHUB_RUN_ID} · attempt ${environment.GITHUB_RUN_ATTEMPT}](${runUrl})`,
-  ].join("\n");
+  const githubAction = { label: "View GitHub run", url: runUrl, primary: false };
+  const presentation = {
+    Starting: {
+      title: "🚀 Private T3 session",
+      template: "blue",
+      status: { color: "blue", label: "STARTING" },
+      summary: "Preparing your one-time development environment…",
+      fields: [
+        { label: "Target", value: environment.SESSION_TARGET_ID },
+        { label: "Run", value: `#${environment.GITHUB_RUN_ID}` },
+        { label: "Attempt", value: environment.GITHUB_RUN_ATTEMPT },
+        { label: "Access", value: "Preparing" },
+      ],
+      actions: [githubAction],
+      note: "Ephemeral GitHub-hosted development session",
+    },
+    Online: {
+      title: "✅ T3 session ready",
+      template: "green",
+      status: { color: "green", label: "ONLINE" },
+      summary: "Your temporary development workspace is ready.",
+      fields: [
+        { label: "Target", value: environment.SESSION_TARGET_ID },
+        { label: "Run", value: `#${environment.GITHUB_RUN_ID}` },
+        {
+          label: "SSH host",
+          value: environment.SESSION_SSH_ONLINE === "true"
+            ? `gha-${environment.GITHUB_RUN_ID}-${environment.GITHUB_RUN_ATTEMPT}`
+            : "Not available",
+        },
+        { label: "Attempt", value: environment.GITHUB_RUN_ATTEMPT },
+      ],
+      actions: [
+        { label: "Open T3 Code", url: environment.SESSION_T3_URL, primary: true },
+        githubAction,
+      ],
+      note: "Pairing credentials remain private on the runner.",
+    },
+    Offline: {
+      title: "⏹️ T3 session offline",
+      template: "grey",
+      status: { color: "neutral", label: "OFFLINE" },
+      summary: "This development session has ended.",
+      fields: [
+        { label: "Target", value: environment.SESSION_TARGET_ID },
+        { label: "Run", value: `#${environment.GITHUB_RUN_ID}` },
+        { label: "Attempt", value: environment.GITHUB_RUN_ATTEMPT },
+        { label: "Access", value: "Removed" },
+      ],
+      actions: [githubAction],
+      note: "Temporary T3 access has been removed.",
+    },
+  }[status];
 
   return {
     schema: "2.0",
     config: { update_multi: true },
     header: {
-      title: { tag: "plain_text", content: "Private T3 session" },
-      template: status === "Online" ? "green" : status === "Offline" ? "grey" : "blue",
+      title: { tag: "plain_text", content: presentation.title },
+      template: presentation.template,
     },
-    body: { elements: [{ tag: "markdown", content }] },
+    body: {
+      elements: [
+        {
+          tag: "markdown",
+          content: `<text_tag color='${presentation.status.color}'>${presentation.status.label}</text_tag>\n\n${presentation.summary}`,
+        },
+        {
+          tag: "div",
+          fields: presentation.fields.map(({ label, value }) => ({
+            is_short: true,
+            text: { tag: "lark_md", content: `**${label}**\n${value}` },
+          })),
+        },
+        {
+          tag: "column_set",
+          flex_mode: "none",
+          horizontal_spacing: "8px",
+          columns: presentation.actions.map(({ label, url, primary }) => ({
+            tag: "column",
+            width: "weighted",
+            weight: 1,
+            elements: [
+              {
+                tag: "interactive_container",
+                width: "fill",
+                background_style: primary ? "green" : "default",
+                has_border: true,
+                border_color: primary ? "green" : "grey",
+                corner_radius: "6px",
+                padding: "8px 12px",
+                behaviors: [{ type: "open_url", default_url: url }],
+                elements: [
+                  {
+                    tag: "div",
+                    text: {
+                      tag: "plain_text",
+                      content: label,
+                      text_align: "center",
+                      text_color: primary ? "white" : "default",
+                    },
+                  },
+                ],
+              },
+            ],
+          })),
+        },
+        {
+          tag: "div",
+          text: {
+            tag: "plain_text",
+            content: presentation.note,
+            text_size: "notation",
+            text_color: "grey",
+          },
+        },
+      ],
+    },
   };
 }
 
