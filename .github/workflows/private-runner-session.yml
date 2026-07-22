@@ -25,10 +25,9 @@ jobs:
     env:
       WORKSPACE: ${{ github.workspace }}/target-workspace
       SESSION_TARGET_ID: ${{ inputs.environment }}
-      LARK_REPORTING_ENABLED: ${{ vars.LARK_REPORTING_ENABLED }}
-      LARK_WEBHOOK_INCLUDE_TEMPORARY_ACCESS: ${{ vars.LARK_WEBHOOK_INCLUDE_TEMPORARY_ACCESS }}
-      LARK_WEBHOOK_URL: ${{ secrets.LARK_WEBHOOK_URL }}
-      LARK_WEBHOOK_SECRET: ${{ secrets.LARK_WEBHOOK_SECRET }}
+      LARK_APP_ID: ${{ secrets.LARK_APP_ID }}
+      LARK_APP_SECRET: ${{ secrets.LARK_APP_SECRET }}
+      LARK_CHAT_NAME: ${{ secrets.LARK_CHAT_NAME }}
 
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -39,7 +38,9 @@ jobs:
         with:
           node-version: 22
 
-      - run: python3 scripts/report-lark.py starting
+      - uses: ./.github/actions/lark-session
+        with:
+          status: starting
 
       - uses: ./.github/actions/development-tools
 
@@ -49,20 +50,9 @@ jobs:
           headscale-url: ${{ secrets.HEADSCALE_URL }}
           auth-key: ${{ secrets.HEADSCALE_AUTHKEY }}
 
-      - if: ${{ inputs.enable_ssh }}
-        env:
-          SESSION_SSH_ONLINE: "true"
-          SESSION_RUNNER_NAME: gha-${{ github.run_id }}-${{ github.run_attempt }}
-        run: python3 scripts/report-lark.py ssh-online
-
       - uses: ./.github/actions/t3-session
         with:
           repository: ${{ secrets.TARGET_REPO }}
           token: ${{ secrets.TARGET_REPO_AUTH }}
           non-durable: ${{ inputs.non_durable }}
           ssh-online: ${{ inputs.enable_ssh }}
-
-      - if: ${{ always() }}
-        env:
-          SESSION_SSH_ONLINE: "false"
-        run: python3 scripts/report-lark.py offline

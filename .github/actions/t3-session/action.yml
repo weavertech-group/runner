@@ -39,11 +39,6 @@ runs:
         sudo apt-get install -y -qq cloudflared
 
     - shell: bash
-      env:
-        SESSION_SSH_ONLINE: ${{ inputs.ssh-online }}
-      run: python3 scripts/report-lark.py setup-ready
-
-    - shell: bash
       run: |
         install -d -m 0700 "$HOME/private-runner-session/t3code"
         npx --yes t3@latest serve --host 127.0.0.1 --port 3773 "$WORKSPACE" \
@@ -78,8 +73,12 @@ runs:
           "$HOME/private-runner-session/t3code/pairing-url" \
           "$HOME/private-runner-session/t3code/connection.txt"
 
-        python3 scripts/report-lark.py service-online
+    - uses: ./.github/actions/lark-session
+      env:
+        SESSION_SSH_ONLINE: ${{ inputs.ssh-online }}
+      with:
+        status: online
 
-        if [[ "${{ inputs.non-durable }}" != "true" ]]; then
-          sleep infinity
-        fi
+    - if: ${{ inputs.non-durable != 'true' }}
+      shell: bash
+      run: sleep infinity

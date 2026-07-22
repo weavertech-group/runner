@@ -30,11 +30,16 @@ This repository follows the happy path. Native commands keep their normal
 output and exit status; the workflow has no custom retry, timeout, fallback, or
 diagnostic-artifact layer.
 
+The Lark application-bot card moves from Starting to Online and is updated to
+Offline by the action's native job teardown hook. Teardown is best-effort when a
+runner is cancelled and cannot run after the runner itself disappears.
+
 ## Local checks
 
 ```bash
 bash tests/workflow-security.test.sh
-python3 tests/report_lark_test.py
+node --test tests/lark-session.test.js
+node --test tests/await-log.test.js
 shellcheck --severity=bash tests/*.sh
 actionlint
 ```

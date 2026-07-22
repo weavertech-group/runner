@@ -21,8 +21,8 @@ project's responsibility after connection and should follow that project's own
 documentation.
 
 Service readiness depends on the connection values emitted by the native
-processes, not a fixed startup delay. A dependency-free local Node action models
-that wait directly and writes resolved values only to private runner files.
+processes, not a fixed startup delay. Dependency-free local Node actions model
+that wait and the Lark card lifecycle directly.
 
 ## Configure a session Environment
 
@@ -40,9 +40,8 @@ Configure `HEADSCALE_URL` as a repository or Environment secret when SSH is
 enabled. The workflow only accepts `workflow_dispatch`, has read-only GitHub
 token permissions, and uses a path-scoped temporary Git credential store.
 
-Optional Lark reporting requires `LARK_REPORTING_ENABLED=true` and the
-`LARK_WEBHOOK_URL` and `LARK_WEBHOOK_SECRET` secrets. See
-[Lark reporting](docs/lark-reporting.md).
+The Lark session card requires the `LARK_APP_ID`, `LARK_APP_SECRET`, and exact
+`LARK_CHAT_NAME` secrets. See [Lark session card](docs/lark-reporting.md).
 
 Protect both the default branch and every session Environment. In particular,
 restrict Environment deployment branches and require reviewers before granting
@@ -88,7 +87,7 @@ or diagnostic-artifact layer.
 
 ```bash
 bash tests/workflow-security.test.sh
-python3 tests/report_lark_test.py
+node --test tests/lark-session.test.js
 node --test tests/await-log.test.js
 shellcheck --severity=bash tests/*.sh
 actionlint

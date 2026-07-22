@@ -1,5 +1,6 @@
 .secrets.env
 *.secrets.env
+.lark.env
 headscale/policy.private.hujson
 headscale/config.private.yaml
 __pycache__/

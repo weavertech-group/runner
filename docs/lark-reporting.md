@@ -1,44 +1,43 @@
-# Lark reporting
+# Lark session card
 
-The private runner can send signed lifecycle messages to a Lark custom-bot
-Webhook. Setting only the Webhook URL is not enough.
+Each private runner session owns one application-bot card. The workflow creates
+the card as `Starting`, updates the same message to `Online` when T3 is ready,
+and uses the JavaScript action's native `post` hook to mark it `Offline` when
+the job finishes or is cancelled.
 
 ## Required configuration
 
-| Kind | Name | Value |
-| --- | --- | --- |
-| Repository variable | `LARK_REPORTING_ENABLED` | `true` |
-| Repository secret | `LARK_WEBHOOK_URL` | Custom-bot Webhook URL (`.../open-apis/bot/v2/hook/...`) |
-| Repository secret | `LARK_WEBHOOK_SECRET` | Custom-bot signing secret |
+Enable the bot capability for a Lark custom app, add the bot to the destination
+group, and grant these permissions:
 
-Optional repository variable:
+- `im:chat:readonly` to list chats visible to the bot.
+- `im:message` to send and update the bot's message card.
 
-| Kind | Name | Value |
-| --- | --- | --- |
-| Repository variable | `LARK_WEBHOOK_INCLUDE_TEMPORARY_ACCESS` | Set to `true` only when Lark may receive the T3 pairing URL. It is disabled by default, so pairing material remains only in SSH-readable private files. |
+Configure these repository or selected-Environment secrets:
 
-Secrets must be repository secrets (or present in the selected Environment). A
-custom bot with signature verification enabled rejects unsigned payloads; this
-repository always signs when reporting is enabled.
+| Secret | Value |
+| --- | --- |
+| `LARK_APP_ID` | Custom app ID |
+| `LARK_APP_SECRET` | Custom app secret |
+| `LARK_CHAT_NAME` | Exact name of the destination group |
 
-## Events
+The action resolves `LARK_CHAT_NAME` by exact match. The bot must already be a
+member of that group. Local credentials may be kept in `.lark.env`; that file is
+ignored by Git and must never be committed.
 
-When reporting is enabled, the workflow sends signed text events:
+## Lifecycle
 
-- `starting`
-- `ssh-online` (only when SSH is enabled)
-- `setup-ready`
-- `service-online` for T3 Code (includes the pairing URL only when
-  `LARK_WEBHOOK_INCLUDE_TEMPORARY_ACCESS=true`)
-- `offline`
+The first action invocation sends the card and saves its `message_id` in GitHub
+Actions environment and action state files. The Online invocation updates that
+message. At job teardown, only the first invocation has cleanup state, so its
+`post` hook updates the same message to Offline. No artifact, external key-value
+store, heartbeat, or cleanup workflow is involved.
 
-Connection details are written only to mode-`0600` files under
-`~/private-runner-session`. This is a public repository: pairing URLs, tokens,
-private repository names, and service logs must never be printed to Actions
-logs or step summaries.
+The Online card includes the temporary T3 origin but not its pairing URL. The
+Offline card removes temporary access. Neither value is written to Actions logs
+or step summaries.
 
-Lark delivery is part of the happy path. HTTP and network failures raise the
-native Python exception and fail the invoking workflow step. The script does not
-interpret the business code in an otherwise successful HTTP response.
-`scripts/report-lark.py` contains the small signing, event-text, and Webhook POST
-needed by the workflow and uses only the Python standard library.
+This cleanup is best-effort. It covers normal completion, step failure, and
+cooperative cancellation while the runner can still execute action teardown. A
+runner that disappears or loses network cannot update the card; detecting that
+case would require an external watchdog.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Contract checks for public-repo safety and signed Lark reporting.
+# Contract checks for public-repo safety and the Lark session card.
 # These are policy assertions over workflow YAML, not behavioral tests.
 # Implementation details (installer URLs, package versions) belong elsewhere.
 
@@ -11,6 +11,8 @@ TOOLS_ACTION="$ROOT_DIR/.github/actions/development-tools/action.yml"
 NETWORK_ACTION="$ROOT_DIR/.github/actions/private-network/action.yml"
 T3_ACTION="$ROOT_DIR/.github/actions/t3-session/action.yml"
 AWAIT_ACTION="$ROOT_DIR/.github/actions/await-log/action.yml"
+LARK_ACTION="$ROOT_DIR/.github/actions/lark-session/action.yml"
+LARK_SCRIPT="$ROOT_DIR/.github/actions/lark-session/index.js"
 
 fail() {
   printf 'FAIL: %s\n' "$1" >&2
@@ -18,23 +20,31 @@ fail() {
 }
 
 [[ -f "$WORKFLOW" ]] || fail "missing workflow: $WORKFLOW"
-for action in "$TOOLS_ACTION" "$NETWORK_ACTION" "$T3_ACTION" "$AWAIT_ACTION"; do
+for action in "$TOOLS_ACTION" "$NETWORK_ACTION" "$T3_ACTION" "$AWAIT_ACTION" "$LARK_ACTION"; do
   [[ -f "$action" ]] || fail "missing composite action: $action"
 done
 
-# Must deliver lifecycle events through the signed reporter, never ad-hoc curl.
-grep -Fq 'python3 scripts/report-lark.py starting' "$WORKFLOW" || \
-  fail 'missing starting Lark report'
-grep -Fq 'python3 scripts/report-lark.py service-online' "$T3_ACTION" || \
-  fail 'missing service-online Lark report'
-grep -Fq 'python3 scripts/report-lark.py offline' "$WORKFLOW" || \
-  fail 'missing offline Lark report'
-grep -Fq 'LARK_REPORTING_ENABLED' "$WORKFLOW" || \
-  fail 'workflow must honor LARK_REPORTING_ENABLED'
-grep -Fq 'LARK_WEBHOOK_SECRET' "$WORKFLOW" || \
-  fail 'workflow must pass LARK_WEBHOOK_SECRET for signed Lark delivery'
-grep -Fq 'secrets.LARK_WEBHOOK_URL' "$WORKFLOW" || \
-  fail 'workflow must pass LARK_WEBHOOK_URL as a secret'
+# One application-bot card owns the session lifecycle and its post hook marks it offline.
+grep -Fq 'uses: ./.github/actions/lark-session' "$WORKFLOW" || \
+  fail 'missing starting Lark session card'
+grep -Fq 'uses: ./.github/actions/lark-session' "$T3_ACTION" || \
+  fail 'missing online Lark session card update'
+grep -Fq 'post: cleanup.js' "$LARK_ACTION" || \
+  fail 'Lark session card must define a post cleanup hook'
+grep -Fq 'Authorization: `Bearer ${accessToken}`' "$LARK_SCRIPT" || \
+  fail 'Lark card requests must use the application access token'
+grep -Fq 'method: "PATCH"' "$LARK_SCRIPT" || \
+  fail 'Lark session card must update the existing message'
+grep -Fq 'secrets.LARK_APP_ID' "$WORKFLOW" || \
+  fail 'workflow must pass LARK_APP_ID'
+grep -Fq 'secrets.LARK_APP_SECRET' "$WORKFLOW" || \
+  fail 'workflow must pass LARK_APP_SECRET'
+grep -Fq 'secrets.LARK_CHAT_NAME' "$WORKFLOW" || \
+  fail 'workflow must pass LARK_CHAT_NAME'
+
+if rg -q 'report-lark[.]py|LARK_WEBHOOK_' "$WORKFLOW" "$ROOT_DIR/.github/actions"; then
+  fail 'workflow still uses the legacy Lark Webhook reporter'
+fi
 
 # Pairing material stays in private session files and is masked if echoed.
 grep -Eq 't3code/pairing-url|SESSION_DIR/t3code/pairing-url' "$T3_ACTION" || \
@@ -89,16 +99,6 @@ fi
 
 if rg -q 'cat "\$t3_log"|cat "\$tunnel_log"' "$WORKFLOW" "$ROOT_DIR/.github/actions"; then
   fail 'workflow dumps service logs that can contain pairing tokens'
-fi
-
-if rg -q 'msg_type:[[:space:]]*"interactive"|msg_type: "interactive"' \
-  "$WORKFLOW" "$ROOT_DIR/.github/actions"; then
-  fail 'workflow must not send unsigned inline Lark interactive payloads'
-fi
-
-if rg -q 'curl[^\n]*\$LARK_WEBHOOK_URL|curl[^\n]*"\$LARK_WEBHOOK_URL"' \
-  "$WORKFLOW" "$ROOT_DIR/.github/actions"; then
-  fail 'workflow must not curl the Lark webhook directly'
 fi
 
 printf '%s\n' 'workflow security contract tests passed'
