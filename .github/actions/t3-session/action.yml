@@ -44,21 +44,31 @@ runs:
       run: python3 scripts/report-lark.py setup-ready
 
     - shell: bash
-      env:
-        SESSION_SSH_ONLINE: ${{ inputs.ssh-online }}
       run: |
         install -d -m 0700 "$HOME/private-runner-session/t3code"
         npx --yes t3@latest serve --host 127.0.0.1 --port 3773 "$WORKSPACE" \
           > "$RUNNER_TEMP/t3code.log" 2>&1 &
         cloudflared tunnel --url http://127.0.0.1:3773 \
           > "$RUNNER_TEMP/cloudflared.log" 2>&1 &
-        sleep 3
 
-        backend_url="$(grep -Em1 -o 'https://[-a-z0-9]+[.]trycloudflare[.]com' "$RUNNER_TEMP/cloudflared.log")"
-        pairing_url="$(grep -m1 '^Pairing URL: ' "$RUNNER_TEMP/t3code.log" | sed 's/^Pairing URL: //')"
-        printf '::add-mask::%s\n' "$backend_url"
-        printf '::add-mask::%s\n' "$pairing_url"
+    - uses: ./.github/actions/await-log
+      with:
+        path: ${{ runner.temp }}/cloudflared.log
+        pattern: '(https://[-a-z0-9]+[.]trycloudflare[.]com)'
+        destination: ${{ runner.temp }}/t3-url
 
+    - uses: ./.github/actions/await-log
+      with:
+        path: ${{ runner.temp }}/t3code.log
+        pattern: '^Pairing URL: ([^\r\n]+)$'
+        destination: ${{ runner.temp }}/pairing-url
+
+    - shell: bash
+      env:
+        SESSION_SSH_ONLINE: ${{ inputs.ssh-online }}
+      run: |
+        backend_url="$(cat "$RUNNER_TEMP/t3-url")"
+        pairing_url="$(cat "$RUNNER_TEMP/pairing-url")"
         umask 077
         printf '%s\n' "$backend_url" > "$HOME/private-runner-session/t3code/t3-url"
         printf '%s\n' "$pairing_url" > "$HOME/private-runner-session/t3code/pairing-url"

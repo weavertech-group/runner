@@ -20,6 +20,10 @@ shell wrapper for these commands. Target-project dependencies remain the target
 project's responsibility after connection and should follow that project's own
 documentation.
 
+Service readiness depends on the connection values emitted by the native
+processes, not a fixed startup delay. A dependency-free local Node action models
+that wait directly and writes resolved values only to private runner files.
+
 ## Configure a session Environment
 
 Create a protected GitHub Environment for each target repository. Its name is
@@ -85,6 +89,7 @@ or diagnostic-artifact layer.
 ```bash
 bash tests/workflow-security.test.sh
 python3 tests/report_lark_test.py
+node --test tests/await-log.test.js
 shellcheck --severity=bash tests/*.sh
 actionlint
 ```

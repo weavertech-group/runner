@@ -10,6 +10,7 @@ WORKFLOW="$ROOT_DIR/.github/workflows/private-runner-session.yml"
 TOOLS_ACTION="$ROOT_DIR/.github/actions/development-tools/action.yml"
 NETWORK_ACTION="$ROOT_DIR/.github/actions/private-network/action.yml"
 T3_ACTION="$ROOT_DIR/.github/actions/t3-session/action.yml"
+AWAIT_ACTION="$ROOT_DIR/.github/actions/await-log/action.yml"
 
 fail() {
   printf 'FAIL: %s\n' "$1" >&2
@@ -17,7 +18,7 @@ fail() {
 }
 
 [[ -f "$WORKFLOW" ]] || fail "missing workflow: $WORKFLOW"
-for action in "$TOOLS_ACTION" "$NETWORK_ACTION" "$T3_ACTION"; do
+for action in "$TOOLS_ACTION" "$NETWORK_ACTION" "$T3_ACTION" "$AWAIT_ACTION"; do
   [[ -f "$action" ]] || fail "missing composite action: $action"
 done
 
@@ -38,8 +39,12 @@ grep -Fq 'secrets.LARK_WEBHOOK_URL' "$WORKFLOW" || \
 # Pairing material stays in private session files and is masked if echoed.
 grep -Eq 't3code/pairing-url|SESSION_DIR/t3code/pairing-url' "$T3_ACTION" || \
   fail 'missing private pairing-url file write'
-grep -Fq '::add-mask::' "$T3_ACTION" || \
+grep -Fq '::add-mask::' "$ROOT_DIR/.github/actions/await-log/index.js" || \
   fail 'missing Actions masking for pairing material'
+
+if grep -Fq 'sleep 3' "$T3_ACTION"; then
+  fail 'service readiness must not depend on a fixed sleep'
+fi
 
 # The environment is intentionally direct and declarative: no cache/bootstrap
 # script should hide tool installation or pin a second toolchain.
