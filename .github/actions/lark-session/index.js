@@ -3,15 +3,94 @@ const { join } = require("node:path");
 
 const API = "https://open.larksuite.com/open-apis";
 
+function factTile({ label, value }) {
+  return {
+    tag: "column",
+    width: "weighted",
+    weight: 1,
+    background_style: "grey",
+    padding: "10px 8px",
+    elements: [
+      {
+        tag: "div",
+        text: {
+          tag: "plain_text",
+          content: label,
+          text_size: "notation",
+          text_color: "grey",
+          text_align: "center",
+        },
+      },
+      {
+        tag: "div",
+        text: {
+          tag: "plain_text",
+          content: value,
+          text_size: "heading",
+          text_align: "center",
+        },
+      },
+    ],
+  };
+}
+
+function factRow(elementId, facts) {
+  return {
+    tag: "column_set",
+    element_id: elementId,
+    flex_mode: "none",
+    horizontal_spacing: "6px",
+    margin: "4px 0px 4px 0px",
+    columns: facts.map(factTile),
+  };
+}
+
+function actionRow(actions) {
+  return {
+    tag: "column_set",
+    element_id: "session_actions",
+    flex_mode: "none",
+    horizontal_spacing: "6px",
+    columns: actions.map(({ label, url, primary }) => ({
+      tag: "column",
+      width: "weighted",
+      weight: 1,
+      elements: [
+        {
+          tag: "interactive_container",
+          width: "fill",
+          background_style: primary ? "green" : "default",
+          has_border: true,
+          border_color: primary ? "green" : "grey",
+          corner_radius: "6px",
+          padding: "8px 12px",
+          behaviors: [{ type: "open_url", default_url: url }],
+          elements: [
+            {
+              tag: "div",
+              text: {
+                tag: "plain_text",
+                content: label,
+                text_align: "center",
+                text_color: primary ? "white" : "default",
+              },
+            },
+          ],
+        },
+      ],
+    })),
+  };
+}
+
 function card(status, environment) {
   const runUrl = `${environment.GITHUB_SERVER_URL}/${environment.GITHUB_REPOSITORY}/actions/runs/${environment.GITHUB_RUN_ID}`;
   const githubAction = { label: "GitHub run", url: runUrl, primary: false };
   const presentation = {
     Starting: {
-      title: "🚀 Private T3 session",
       template: "blue",
       status: { color: "blue", label: "STARTING" },
-      summary: "Preparing your one-time development environment…",
+      subtitle: "One-time development environment",
+      summary: "Preparing your temporary workspace…",
       fields: [
         { label: "Target", value: environment.SESSION_TARGET_ID },
         { label: "Run", value: `#${environment.GITHUB_RUN_ID}` },
@@ -22,9 +101,9 @@ function card(status, environment) {
       note: "Ephemeral GitHub-hosted development session",
     },
     Online: {
-      title: "✅ T3 session ready",
       template: "green",
       status: { color: "green", label: "ONLINE" },
+      subtitle: "Development environment ready",
       summary: "Your temporary development workspace is ready.",
       fields: [
         { label: "Target", value: environment.SESSION_TARGET_ID },
@@ -45,9 +124,9 @@ function card(status, environment) {
       note: "Pairing access is shared with this Lark chat. Treat it as a credential.",
     },
     Offline: {
-      title: "⏹️ T3 session offline",
       template: "grey",
       status: { color: "neutral", label: "OFFLINE" },
+      subtitle: "Session ended · Temporary access removed",
       summary: "This development session has ended.",
       fields: [
         { label: "Target", value: environment.SESSION_TARGET_ID },
@@ -62,57 +141,38 @@ function card(status, environment) {
 
   return {
     schema: "2.0",
-    config: { update_multi: true, enable_forward: false },
+    config: {
+      update_multi: true,
+      enable_forward: false,
+      summary: {
+        content: `Private T3 session: ${status}`,
+      },
+    },
     header: {
-      title: { tag: "plain_text", content: presentation.title },
+      title: { tag: "plain_text", content: "Private T3 session" },
+      subtitle: { tag: "plain_text", content: presentation.subtitle },
       template: presentation.template,
+      text_tag_list: [
+        {
+          tag: "text_tag",
+          text: { tag: "plain_text", content: presentation.status.label },
+          color: presentation.status.color,
+        },
+      ],
     },
     body: {
+      direction: "vertical",
+      padding: "8px 8px 8px 8px",
+      vertical_spacing: "6px",
       elements: [
         {
-          tag: "markdown",
-          content: `<text_tag color='${presentation.status.color}'>${presentation.status.label}</text_tag>\n\n${presentation.summary}`,
-        },
-        {
           tag: "div",
-          fields: presentation.fields.map(({ label, value }) => ({
-            is_short: true,
-            text: { tag: "lark_md", content: `**${label}**\n${value}` },
-          })),
+          text: { tag: "plain_text", content: presentation.summary },
         },
-        {
-          tag: "column_set",
-          flex_mode: "none",
-          horizontal_spacing: "8px",
-          columns: presentation.actions.map(({ label, url, primary }) => ({
-            tag: "column",
-            width: "weighted",
-            weight: 1,
-            elements: [
-              {
-                tag: "interactive_container",
-                width: "fill",
-                background_style: primary ? "green" : "default",
-                has_border: true,
-                border_color: primary ? "green" : "grey",
-                corner_radius: "6px",
-                padding: "8px 12px",
-                behaviors: [{ type: "open_url", default_url: url }],
-                elements: [
-                  {
-                    tag: "div",
-                    text: {
-                      tag: "plain_text",
-                      content: label,
-                      text_align: "center",
-                      text_color: primary ? "white" : "default",
-                    },
-                  },
-                ],
-              },
-            ],
-          })),
-        },
+        factRow("session_facts_primary", presentation.fields.slice(0, 2)),
+        factRow("session_facts_secondary", presentation.fields.slice(2)),
+        { tag: "hr", margin: "6px 0px 6px 0px" },
+        actionRow(presentation.actions),
         {
           tag: "div",
           text: {

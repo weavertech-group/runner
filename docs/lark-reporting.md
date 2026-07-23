@@ -43,6 +43,11 @@ The payload uses Lark card JSON 2.0 throughout. Its links are JSON 2.0
 interactive containers and its footnote is notation text; the legacy `action`
 and `note` elements are not valid in this schema.
 
+The visual hierarchy is deliberately compact: the header carries the lifecycle
+status, session facts use two-column grey tiles, and a divider separates facts
+from connection actions. All three lifecycle states share that structure so an
+in-place update does not move the important information unexpectedly.
+
 This cleanup is best-effort. It covers normal completion, step failure, and
 cooperative cancellation while the runner can still execute action teardown. A
 runner that disappears or loses network cannot update the card; detecting that

@@ -11,13 +11,19 @@ function response(body) {
   return { json: async () => body };
 }
 
-function cardFields(card) {
-  return card.body.elements.find(({ fields }) => fields).fields;
+function cardFacts(card) {
+  return card.body.elements
+    .filter(({ element_id: elementId }) => elementId?.startsWith("session_facts_"))
+    .flatMap(({ columns }) => columns)
+    .map(({ elements }) => ({
+      label: elements[0].text.content,
+      value: elements[1].text.content,
+    }));
 }
 
 function cardActions(card) {
   return card.body.elements
-    .find(({ tag }) => tag === "column_set")
+    .find(({ element_id: elementId }) => elementId === "session_actions")
     .columns.map(({ elements }) => elements[0]);
 }
 
@@ -93,25 +99,33 @@ test("starting creates one card in the exact chat and saves its message id", asy
   assert.equal(sent.receive_id, "oc_runner");
   assert.equal(sent.msg_type, "interactive");
   const card = JSON.parse(sent.content);
+  assert.equal(card.config.summary.content, "Private T3 session: Starting");
   assert.equal(card.header.template, "blue");
-  assert.equal(card.header.title.content, "🚀 Private T3 session");
-  assert.match(card.body.elements[0].content, /<text_tag color='blue'>STARTING<\/text_tag>/);
+  assert.equal(card.header.title.content, "Private T3 session");
+  assert.equal(card.header.subtitle.content, "One-time development environment");
+  assert.deepEqual(card.header.text_tag_list, [
+    { tag: "text_tag", text: { tag: "plain_text", content: "STARTING" }, color: "blue" },
+  ]);
+  assert.equal(card.body.direction, "vertical");
+  assert.equal(card.body.padding, "8px 8px 8px 8px");
+  assert.equal(card.body.vertical_spacing, "6px");
+  assert.equal(card.body.elements[0].text.content, "Preparing your temporary workspace…");
   assert.deepEqual(
-    cardFields(card).map(({ text }) => text.content),
+    cardFacts(card),
     [
-      "**Target**\nrepo-01",
-      "**Run**\n#123456",
-      "**Attempt**\n2",
-      "**Access**\nPreparing",
+      { label: "Target", value: "repo-01" },
+      { label: "Run", value: "#123456" },
+      { label: "Attempt", value: "2" },
+      { label: "Access", value: "Preparing" },
     ],
   );
-  assert.equal(card.body.elements[2].tag, "column_set");
+  assert.ok(card.body.elements.some(({ tag }) => tag === "hr"));
   assert.deepEqual(
     cardActions(card).map(({ elements }) => elements[0].text.content),
     ["GitHub run"],
   );
-  assert.equal(card.body.elements[3].tag, "div");
-  assert.equal(card.body.elements[3].text.text_size, "notation");
+  assert.equal(card.body.elements.at(-1).tag, "div");
+  assert.equal(card.body.elements.at(-1).text.text_size, "notation");
   assert.equal(await readFile(context.environment.GITHUB_ENV, "utf8"), "LARK_MESSAGE_ID=om_session\n");
   assert.equal(await readFile(context.environment.GITHUB_STATE, "utf8"), "message_id=om_session\n");
   await rm(context.directory, { recursive: true });
@@ -142,16 +156,20 @@ test("online updates the existing card without registering another cleanup", asy
   const updated = JSON.parse(requests[1].options.body);
   const card = JSON.parse(updated.content);
   assert.equal(card.config.enable_forward, false);
+  assert.equal(card.config.summary.content, "Private T3 session: Online");
   assert.equal(card.header.template, "green");
-  assert.equal(card.header.title.content, "✅ T3 session ready");
-  assert.match(card.body.elements[0].content, /<text_tag color='green'>ONLINE<\/text_tag>/);
+  assert.equal(card.header.title.content, "Private T3 session");
+  assert.equal(card.header.subtitle.content, "Development environment ready");
+  assert.deepEqual(card.header.text_tag_list, [
+    { tag: "text_tag", text: { tag: "plain_text", content: "ONLINE" }, color: "green" },
+  ]);
   assert.deepEqual(
-    cardFields(card).map(({ text }) => text.content),
+    cardFacts(card),
     [
-      "**Target**\nrepo-01",
-      "**Run**\n#123456",
-      "**SSH host**\nNot available",
-      "**Attempt**\n2",
+      { label: "Target", value: "repo-01" },
+      { label: "Run", value: "#123456" },
+      { label: "SSH host", value: "Not available" },
+      { label: "Attempt", value: "2" },
     ],
   );
   const actions = cardActions(card);
@@ -190,16 +208,20 @@ test("post updates the owning card to Offline and omits temporary access", async
   );
   const updated = JSON.parse(requests[1].options.body);
   const card = JSON.parse(updated.content);
+  assert.equal(card.config.summary.content, "Private T3 session: Offline");
   assert.equal(card.header.template, "grey");
-  assert.equal(card.header.title.content, "⏹️ T3 session offline");
-  assert.match(card.body.elements[0].content, /<text_tag color='neutral'>OFFLINE<\/text_tag>/);
+  assert.equal(card.header.title.content, "Private T3 session");
+  assert.equal(card.header.subtitle.content, "Session ended · Temporary access removed");
+  assert.deepEqual(card.header.text_tag_list, [
+    { tag: "text_tag", text: { tag: "plain_text", content: "OFFLINE" }, color: "neutral" },
+  ]);
   assert.deepEqual(
-    cardFields(card).map(({ text }) => text.content),
+    cardFacts(card),
     [
-      "**Target**\nrepo-01",
-      "**Run**\n#123456",
-      "**Attempt**\n2",
-      "**Access**\nRemoved",
+      { label: "Target", value: "repo-01" },
+      { label: "Run", value: "#123456" },
+      { label: "Attempt", value: "2" },
+      { label: "Access", value: "Removed" },
     ],
   );
   assert.deepEqual(
