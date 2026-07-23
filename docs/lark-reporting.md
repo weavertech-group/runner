@@ -33,9 +33,11 @@ message. At job teardown, only the first invocation has cleanup state, so its
 `post` hook updates the same message to Offline. No artifact, external key-value
 store, heartbeat, or cleanup workflow is involved.
 
-The Online card includes the temporary T3 origin but not its pairing URL. The
-Offline card removes temporary access. Neither value is written to Actions logs
-or step summaries.
+The Online card includes both the temporary T3 origin and the native pairing
+URL. Anyone who can read the destination chat can use that pairing access, so
+the card disables forwarding and the group membership is part of the credential
+trust boundary. The Offline card removes both links. Neither value is written to
+Actions logs or step summaries.
 
 The payload uses Lark card JSON 2.0 throughout. Its links are JSON 2.0
 interactive containers and its footnote is notation text; the legacy `action`

@@ -35,6 +35,10 @@ grep -Fq 'Authorization: `Bearer ${accessToken}`' "$LARK_SCRIPT" || \
   fail 'Lark card requests must use the application access token'
 grep -Fq 'method: "PATCH"' "$LARK_SCRIPT" || \
   fail 'Lark session card must update the existing message'
+grep -Fq '"pairing-url"' "$LARK_SCRIPT" || \
+  fail 'Lark session card must read the native T3 pairing URL'
+grep -Fq 'enable_forward: false' "$LARK_SCRIPT" || \
+  fail 'Lark session card containing pairing access must not be forwardable'
 grep -Fq 'secrets.LARK_APP_ID' "$WORKFLOW" || \
   fail 'workflow must pass LARK_APP_ID'
 grep -Fq 'secrets.LARK_APP_SECRET' "$WORKFLOW" || \
@@ -87,7 +91,8 @@ if rg -q 'pairing_token|app[.]t3[.]codes/pair[?]host|/pair#token=' \
 fi
 
 # Public repository: never publish pairing material, private repo names, or
-# token-bearing service logs through Actions-visible channels.
+# token-bearing service logs through Actions-visible channels. Pairing access
+# belongs only in the configured non-forwardable Lark card.
 if rg -q 'GITHUB_STEP_SUMMARY' "$WORKFLOW" "$ROOT_DIR/.github/actions"; then
   fail 'workflow writes GitHub step summary (public on public repos)'
 fi

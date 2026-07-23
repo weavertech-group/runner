@@ -21,8 +21,9 @@ Read the private connection data after connecting:
 cat ~/private-runner-session/t3code/connection.txt
 ```
 
-The file is mode `0600`. Do not copy its pairing URL to Actions output,
-artifacts, or an untrusted chat.
+The file is mode `0600`. The Online Lark card also carries the pairing URL for
+the configured trusted group. Do not copy it to Actions output, artifacts, any
+other chat, or public tracking systems.
 
 ## Failure behavior
 

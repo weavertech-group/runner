@@ -108,7 +108,7 @@ test("starting creates one card in the exact chat and saves its message id", asy
   assert.equal(card.body.elements[2].tag, "column_set");
   assert.deepEqual(
     cardActions(card).map(({ elements }) => elements[0].text.content),
-    ["View GitHub run"],
+    ["GitHub run"],
   );
   assert.equal(card.body.elements[3].tag, "div");
   assert.equal(card.body.elements[3].text.text_size, "notation");
@@ -123,6 +123,7 @@ test("online updates the existing card without registering another cleanup", asy
   const sessionDirectory = join(context.directory, "private-runner-session", "t3code");
   await mkdir(sessionDirectory, { recursive: true });
   await writeFile(join(sessionDirectory, "t3-url"), "https://runner.trycloudflare.com\n");
+  await writeFile(join(sessionDirectory, "pairing-url"), "https://app.t3.codes/pair#pairing-secret\n");
   const requests = [];
   const fetch = async (url, options = {}) => {
     requests.push({ url: String(url), options });
@@ -140,6 +141,7 @@ test("online updates the existing card without registering another cleanup", asy
   assert.equal(requests[1].options.method, "PATCH");
   const updated = JSON.parse(requests[1].options.body);
   const card = JSON.parse(updated.content);
+  assert.equal(card.config.enable_forward, false);
   assert.equal(card.header.template, "green");
   assert.equal(card.header.title.content, "✅ T3 session ready");
   assert.match(card.body.elements[0].content, /<text_tag color='green'>ONLINE<\/text_tag>/);
@@ -154,11 +156,13 @@ test("online updates the existing card without registering another cleanup", asy
   );
   const actions = cardActions(card);
   assert.deepEqual(actions.map(({ elements }) => elements[0].text.content), [
-    "Open T3 Code",
-    "View GitHub run",
+    "Open T3",
+    "Pair T3",
+    "GitHub run",
   ]);
   assert.equal(actions[0].background_style, "green");
   assert.equal(actions[0].behaviors[0].default_url, "https://runner.trycloudflare.com");
+  assert.equal(actions[1].behaviors[0].default_url, "https://app.t3.codes/pair#pairing-secret");
   assert.equal(await readFile(context.environment.GITHUB_STATE, "utf8"), "");
   await cleanup(context.environment, fetch);
   assert.equal(requests.length, 2);
@@ -169,6 +173,7 @@ test("post updates the owning card to Offline and omits temporary access", async
   const context = await actionEnvironment("starting");
   context.environment.STATE_message_id = "om_session";
   context.environment.SESSION_T3_URL = "https://runner.trycloudflare.com";
+  context.environment.SESSION_PAIRING_URL = "https://app.t3.codes/pair#pairing-secret";
   const requests = [];
   const fetch = async (url, options = {}) => {
     requests.push({ url: String(url), options });
@@ -199,8 +204,9 @@ test("post updates the owning card to Offline and omits temporary access", async
   );
   assert.deepEqual(
     cardActions(card).map(({ elements }) => elements[0].text.content),
-    ["View GitHub run"],
+    ["GitHub run"],
   );
   assert.doesNotMatch(JSON.stringify(card), /trycloudflare/);
+  assert.doesNotMatch(JSON.stringify(card), /pairing-secret/);
   await rm(context.directory, { recursive: true });
 });

@@ -5,7 +5,7 @@ const API = "https://open.larksuite.com/open-apis";
 
 function card(status, environment) {
   const runUrl = `${environment.GITHUB_SERVER_URL}/${environment.GITHUB_REPOSITORY}/actions/runs/${environment.GITHUB_RUN_ID}`;
-  const githubAction = { label: "View GitHub run", url: runUrl, primary: false };
+  const githubAction = { label: "GitHub run", url: runUrl, primary: false };
   const presentation = {
     Starting: {
       title: "🚀 Private T3 session",
@@ -38,10 +38,11 @@ function card(status, environment) {
         { label: "Attempt", value: environment.GITHUB_RUN_ATTEMPT },
       ],
       actions: [
-        { label: "Open T3 Code", url: environment.SESSION_T3_URL, primary: true },
+        { label: "Open T3", url: environment.SESSION_T3_URL, primary: true },
+        { label: "Pair T3", url: environment.SESSION_PAIRING_URL, primary: false },
         githubAction,
       ],
-      note: "Pairing credentials remain private on the runner.",
+      note: "Pairing access is shared with this Lark chat. Treat it as a credential.",
     },
     Offline: {
       title: "⏹️ T3 session offline",
@@ -61,7 +62,7 @@ function card(status, environment) {
 
   return {
     schema: "2.0",
-    config: { update_multi: true },
+    config: { update_multi: true, enable_forward: false },
     header: {
       title: { tag: "plain_text", content: presentation.title },
       template: presentation.template,
@@ -146,15 +147,19 @@ async function run(environment = process.env, fetchImpl = fetch) {
   };
   if (environment.INPUT_STATUS !== "starting") {
     const status = environment.INPUT_STATUS === "online" ? "Online" : "Offline";
-    const cardEnvironment = status === "Online"
-      ? {
-          ...environment,
-          SESSION_T3_URL: environment.SESSION_T3_URL ?? (await readFile(
-            join(environment.HOME, "private-runner-session", "t3code", "t3-url"),
-            "utf8",
-          )).trim(),
-        }
-      : environment;
+    let cardEnvironment = environment;
+    if (status === "Online") {
+      const sessionDirectory = join(environment.HOME, "private-runner-session", "t3code");
+      const [t3Url, pairingUrl] = await Promise.all([
+        environment.SESSION_T3_URL ?? readFile(join(sessionDirectory, "t3-url"), "utf8"),
+        environment.SESSION_PAIRING_URL ?? readFile(join(sessionDirectory, "pairing-url"), "utf8"),
+      ]);
+      cardEnvironment = {
+        ...environment,
+        SESSION_T3_URL: t3Url.trim(),
+        SESSION_PAIRING_URL: pairingUrl.trim(),
+      };
+    }
     await fetchImpl(`${API}/im/v1/messages/${environment.LARK_MESSAGE_ID}`, {
       method: "PATCH",
       headers,

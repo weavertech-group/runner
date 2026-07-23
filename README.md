@@ -72,9 +72,12 @@ Private connection data is mode `0600` under:
 ```
 
 The file records the Cloudflare public origin and the pairing URL emitted by
-T3 itself. The workflow never constructs, rewrites, or publishes pairing URLs.
-If external pairing requires an explicit public origin, use the upstream T3
-configuration intended for that purpose instead of rewriting its output.
+T3 itself. The workflow never constructs or rewrites pairing URLs. It publishes
+the native pairing URL only in the non-forwardable Online Lark card and removes
+it when the card becomes Offline; it never writes that URL to Actions logs,
+summaries, or artifacts. If external pairing requires an explicit public origin,
+use the upstream T3 configuration intended for that purpose instead of rewriting
+its output.
 The Quick Tunnel URL and all runner state disappear when the session ends.
 
 ## Failure behavior

@@ -39,6 +39,6 @@ jobs:
         shell: bash
         run: bash tests/workflow-security.test.sh
 
-      - name: Test Lark Webhook
+      - name: Test Node actions
         shell: bash
-        run: python3 tests/report_lark_test.py
+        run: node --test tests/*.test.js
