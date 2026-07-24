@@ -12,14 +12,10 @@ jobs:
   test:
     runs-on: ubuntu-24.04
     steps:
-      - name: Check out repository quietly
-        shell: bash
-        run: |
-          set -euo pipefail
-          git init -q
-          git remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
-          git fetch -q --depth=1 origin "$GITHUB_REF"
-          git checkout -q FETCH_HEAD
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
 
       - name: Install shellcheck and actionlint
         shell: bash
@@ -27,15 +23,13 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y -qq shellcheck
-          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
           shellcheck --version
           ./actionlint -version
 
       - name: Lint GitHub Actions workflows
         shell: bash
-        run: |
-          set -o pipefail
-          ./actionlint -color 2>&1 | tail -n 40
+        run: ./actionlint -color
 
       - name: ShellCheck scripts and tests
         shell: bash
