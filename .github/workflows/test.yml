@@ -29,7 +29,9 @@ jobs:
 
       - name: Lint GitHub Actions workflows
         shell: bash
-        run: ./actionlint -color
+        run: |
+          set -o pipefail
+          ./actionlint -color 2>&1 | tail -n 40
 
       - name: ShellCheck scripts and tests
         shell: bash
