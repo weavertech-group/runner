@@ -23,7 +23,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update -qq
           sudo apt-get install -y -qq shellcheck
-          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7
+          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
           shellcheck --version
           ./actionlint -version
 
@@ -33,7 +33,7 @@ jobs:
 
       - name: ShellCheck scripts and tests
         shell: bash
-        run: shellcheck --severity=bash tests/*.sh
+        run: shellcheck --severity=warning tests/*.sh
 
       - name: Test workflow security contract
         shell: bash

@@ -148,14 +148,24 @@ jobs:
         shell: bash
         run: git -C "$WORKSPACE" diff --check
 
+      - name: Detect task changes
+        id: changes
+        shell: bash
+        run: |
+          if [[ -n "$(git -C "$WORKSPACE" status --porcelain)" ]]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Start task branch
-        if: ${{ inputs.mode != 'analyze' }}
+        if: ${{ inputs.mode != 'analyze' && steps.changes.outputs.changed == 'true' }}
         shell: bash
         working-directory: target-workspace
         run: git switch -c "task/$TASK_ID"
 
       - name: Report committing
-        if: ${{ inputs.mode != 'analyze' }}
+        if: ${{ inputs.mode != 'analyze' && steps.changes.outputs.changed == 'true' }}
         uses: ./.github/actions/task-control
         with:
           operation: event
@@ -164,7 +174,7 @@ jobs:
           status: committing
 
       - name: Commit task changes
-        if: ${{ inputs.mode != 'analyze' }}
+        if: ${{ inputs.mode != 'analyze' && steps.changes.outputs.changed == 'true' }}
         shell: bash
         working-directory: target-workspace
         run: |
@@ -174,7 +184,7 @@ jobs:
           git commit -m "Execute code task $TASK_ID"
 
       - name: Push task branch
-        if: ${{ inputs.mode != 'analyze' }}
+        if: ${{ inputs.mode != 'analyze' && steps.changes.outputs.changed == 'true' }}
         shell: bash
         env:
           TARGET_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -186,7 +196,7 @@ jobs:
           git push origin "task/$TASK_ID"
 
       - name: Open pull request
-        if: ${{ inputs.mode == 'pull_request' }}
+        if: ${{ inputs.mode == 'pull_request' && steps.changes.outputs.changed == 'true' }}
         id: pull-request
         shell: bash
         env:
@@ -207,10 +217,20 @@ jobs:
         shell: bash
         run: |
           commit="$(git -C "$WORKSPACE" rev-parse HEAD)"
-          summary="$(if [[ "$TASK_MODE" == "analyze" ]]; then git -C "$WORKSPACE" status --short; else git -C "$WORKSPACE" show --stat --oneline --format=short HEAD; fi)"
+          changed="${{ steps.changes.outputs.changed }}"
+          branch=""
+          if [[ "$TASK_MODE" == "analyze" ]]; then
+            summary="$(git -C "$WORKSPACE" status --short)"
+            [[ -n "$summary" ]] || summary="No changes produced."
+          elif [[ "$changed" == "true" ]]; then
+            branch="task/$TASK_ID"
+            summary="$(git -C "$WORKSPACE" show --stat --oneline --format=short HEAD)"
+          else
+            summary="No changes produced."
+          fi
           jq -n \
             --arg commit "$commit" \
-            --arg branch "$(if [[ "$TASK_MODE" == "analyze" ]]; then echo; else echo "task/$TASK_ID"; fi)" \
+            --arg branch "$branch" \
             --arg summary "$summary" \
             --arg pullRequest "${{ steps.pull-request.outputs.url }}" \
             '{commit:$commit,summary:$summary} + (if $branch == "" then {} else {branch:$branch} end) + (if $pullRequest == "" then {} else {pullRequest:$pullRequest} end)' \

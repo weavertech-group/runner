@@ -42,7 +42,7 @@ export async function cancelWorkflow(env, task) {
   }
 }
 
-export async function authorizeRepository(repo, props, mode) {
+export async function authorizeRepository(repo, props, mode, ref) {
   const token = props?.githubAccessToken;
   if (!token) throw new Error("GitHub authorization is required");
   const response = await fetch(`${API}/repos/${repo}`, {
@@ -52,6 +52,15 @@ export async function authorizeRepository(repo, props, mode) {
   const repository = await response.json();
   if (mode !== "analyze" && !repository.permissions?.push) {
     throw new Error("GitHub write access is required for this task mode");
+  }
+  if (mode === "pull_request") {
+    const branchResponse = await fetch(
+      `${API}/repos/${repo}/branches/${encodeURIComponent(ref)}`,
+      { headers: githubHeaders(token) },
+    );
+    if (!branchResponse.ok) {
+      throw new Error("pull_request mode requires ref to name an accessible branch");
+    }
   }
   return repository;
 }
