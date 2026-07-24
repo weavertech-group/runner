@@ -63,7 +63,7 @@ export function createServer(env, props) {
     async (input) => {
       requireScopes(props, SECURITY_SCHEMES.submit_task[0].scopes);
       const taskInput = validateSubmitInput(input);
-      await authorizeRepository(taskInput.repo, props, taskInput.mode);
+      await authorizeRepository(taskInput.repo, props, taskInput.mode, taskInput.ref);
       const task = {
         id: `task_${crypto.randomUUID()}`,
         ...taskInput,
@@ -73,7 +73,15 @@ export function createServer(env, props) {
         createdAt: new Date().toISOString(),
       };
       await writeTask(env, task);
-      await dispatchWorkflow(env, task);
+      try {
+        await dispatchWorkflow(env, task);
+      } catch (error) {
+        await updateTask(env, task.id, {
+          status: "failed",
+          error: "workflow dispatch failed",
+        }).catch(() => undefined);
+        throw error;
+      }
       return result({
         taskId: task.id,
         status: "queued",
