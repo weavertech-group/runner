@@ -1,0 +1,37 @@
+{
+  "name": "weavergroup-runner-control-plane",
+  "main": "src/index.js",
+  "compatibility_date": "2026-07-23",
+  "compatibility_flags": [
+    "nodejs_compat",
+    "global_fetch_strictly_public"
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "TASKS",
+        "class_name": "TaskObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["TaskObject"]
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV",
+      "id": "REPLACE_WITH_OAUTH_KV_NAMESPACE_ID"
+    }
+  ],
+  "vars": {
+    "GITHUB_RUNNER_REPOSITORY": "weavertech-group/runner",
+    "GITHUB_WORKFLOW_ID": "execute-task.yml",
+    "GITHUB_RUNNER_REF": "main",
+    "GITHUB_APP_INSTALLATION_ID": "REPLACE_WITH_RUNNER_INSTALLATION_ID",
+    "GITHUB_OAUTH_CLIENT_ID": "REPLACE_WITH_GITHUB_OAUTH_CLIENT_ID",
+    "TASK_CONTROL_PLANE_URL": "https://runner.example.com"
+  }
+}

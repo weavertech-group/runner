@@ -7,12 +7,15 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKFLOW="$ROOT_DIR/.github/workflows/private-runner-session.yml"
+TASK_WORKFLOW="$ROOT_DIR/.github/workflows/execute-task.yml"
 TOOLS_ACTION="$ROOT_DIR/.github/actions/development-tools/action.yml"
 NETWORK_ACTION="$ROOT_DIR/.github/actions/private-network/action.yml"
 T3_ACTION="$ROOT_DIR/.github/actions/t3-session/action.yml"
 AWAIT_ACTION="$ROOT_DIR/.github/actions/await-log/action.yml"
 LARK_ACTION="$ROOT_DIR/.github/actions/lark-session/action.yml"
 LARK_SCRIPT="$ROOT_DIR/.github/actions/lark-session/index.js"
+CONTROL_ACTION="$ROOT_DIR/.github/actions/task-control/action.yml"
+CONTROL_SCRIPT="$ROOT_DIR/.github/actions/task-control/index.js"
 
 fail() {
   printf 'FAIL: %s\n' "$1" >&2
@@ -20,7 +23,8 @@ fail() {
 }
 
 [[ -f "$WORKFLOW" ]] || fail "missing workflow: $WORKFLOW"
-for action in "$TOOLS_ACTION" "$NETWORK_ACTION" "$T3_ACTION" "$AWAIT_ACTION" "$LARK_ACTION"; do
+[[ -f "$TASK_WORKFLOW" ]] || fail "missing workflow: $TASK_WORKFLOW"
+for action in "$TOOLS_ACTION" "$NETWORK_ACTION" "$T3_ACTION" "$AWAIT_ACTION" "$LARK_ACTION" "$CONTROL_ACTION"; do
   [[ -f "$action" ]] || fail "missing composite action: $action"
 done
 
@@ -45,6 +49,38 @@ grep -Fq 'secrets.LARK_APP_SECRET' "$WORKFLOW" || \
   fail 'workflow must pass LARK_APP_SECRET'
 grep -Fq 'secrets.LARK_CHAT_NAME' "$WORKFLOW" || \
   fail 'workflow must pass LARK_CHAT_NAME'
+
+# The control-plane workflow receives task metadata only. The private prompt is
+# fetched through a GitHub OIDC-authenticated callback after the runner starts.
+for input in task_id repo ref executor mode; do
+  grep -Fq "      $input:" "$TASK_WORKFLOW" || \
+    fail "task workflow missing input: $input"
+done
+if grep -Fq '      prompt:' "$TASK_WORKFLOW"; then
+  fail 'task workflow must not accept the private prompt as dispatch input'
+fi
+grep -Fq 'id-token: write' "$TASK_WORKFLOW" || \
+  fail 'task workflow must request OIDC identity for callbacks'
+grep -Fq 'uses: ./.github/actions/task-control' "$TASK_WORKFLOW" || \
+  fail 'task workflow must use the OIDC task-control action'
+grep -Fq 'status: task.status' "$ROOT_DIR/apps/chatgpt-app/src/index.js" || \
+  fail 'runner prompt fetch must expose cancellation status'
+grep -Fq 'git -C "$WORKSPACE" status --short' "$TASK_WORKFLOW" || \
+  fail 'analyze result must include untracked files'
+grep -Fq 'ACTIONS_ID_TOKEN_REQUEST_URL' "$CONTROL_SCRIPT" || \
+  fail 'task-control action must obtain a GitHub OIDC token'
+grep -Fq '::add-mask::' "$CONTROL_SCRIPT" || \
+  fail 'task-control action must mask its callback token'
+if grep -Fq 'GITHUB_APP_PRIVATE_KEY: ${{ secrets.GITHUB_APP_PRIVATE_KEY }}' "$TASK_WORKFLOW"; then
+  fail 'GitHub App private key must not be job-wide executor environment'
+fi
+grep -Fq 'https://x.ai/cli/install.sh' "$TASK_WORKFLOW" || \
+  fail 'task workflow must use the official Grok Build installer'
+grep -Fq 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1' "$TASK_WORKFLOW" || \
+  fail 'task workflow must use a SHA-pinned GitHub App token action'
+
+grep -Fq 'securitySchemes: SECURITY_SCHEMES' "$ROOT_DIR/apps/chatgpt-app/src/mcp.js" || \
+  fail 'MCP tools must advertise their OAuth security schemes'
 
 if rg -q 'report-lark[.]py|LARK_WEBHOOK_' "$WORKFLOW" "$ROOT_DIR/.github/actions"; then
   fail 'workflow still uses the legacy Lark Webhook reporter'
