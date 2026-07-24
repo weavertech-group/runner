@@ -12,10 +12,14 @@ jobs:
   test:
     runs-on: ubuntu-24.04
     steps:
-      - name: Check out repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
-        with:
-          persist-credentials: false
+      - name: Check out repository quietly
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init -q
+          git remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          git fetch -q --depth=1 origin "$GITHUB_REF"
+          git checkout -q FETCH_HEAD
 
       - name: Install shellcheck and actionlint
         shell: bash
