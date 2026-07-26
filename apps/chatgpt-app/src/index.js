@@ -1,7 +1,16 @@
-import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
+import {
+  OAuthError,
+  OAuthProvider,
+} from "@cloudflare/workers-oauth-provider";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 
+import {
+  exchangeGitHubUserCode,
+  githubGrantTokenExchange,
+  githubUserAuthorizationUrl,
+  githubUserTokenProps,
+} from "./github-user-auth.js";
 import { handleMcpRequest } from "./mcp.js";
 import { TaskObject } from "./task-object.js";
 
@@ -22,23 +31,40 @@ export class McpApi extends WorkerEntrypoint {
   }
 }
 
-export default new OAuthProvider({
-  apiRoute: "/mcp",
-  apiHandler: McpApi,
-  defaultHandler: { fetch: defaultFetch },
-  authorizeEndpoint: "/authorize",
-  tokenEndpoint: "/oauth/token",
-  clientRegistrationEndpoint: "/oauth/register",
-  scopesSupported: OAUTH_SCOPES,
-  resourceMetadata: {
-    scopes_supported: OAUTH_SCOPES,
-    bearer_methods_supported: ["header"],
-    resource_name: "WeaverGroup code task runner",
+export default {
+  fetch(request, env, ctx) {
+    return createOAuthProvider(env).fetch(request, env, ctx);
   },
-  allowImplicitFlow: false,
-  allowPlainPKCE: false,
-  clientIdMetadataDocumentEnabled: true,
-});
+};
+
+function createOAuthProvider(env) {
+  return new OAuthProvider({
+    apiRoute: "/mcp",
+    apiHandler: McpApi,
+    defaultHandler: { fetch: defaultFetch },
+    authorizeEndpoint: "/authorize",
+    tokenEndpoint: "/oauth/token",
+    clientRegistrationEndpoint: "/oauth/register",
+    scopesSupported: OAUTH_SCOPES,
+    resourceMetadata: {
+      scopes_supported: OAUTH_SCOPES,
+      bearer_methods_supported: ["header"],
+      resource_name: "WeaverGroup code task runner",
+    },
+    allowImplicitFlow: false,
+    allowPlainPKCE: false,
+    clientIdMetadataDocumentEnabled: true,
+    tokenExchangeCallback: async (options) => {
+      try {
+        return await githubGrantTokenExchange(env, options);
+      } catch {
+        throw new OAuthError("invalid_grant", {
+          description: "GitHub authorization expired or was revoked",
+        });
+      }
+    },
+  });
+}
 
 async function defaultFetch(request, env) {
   const url = new URL(request.url);
@@ -139,7 +165,12 @@ async function verifyRunnerIdentity(request, env) {
 }
 
 async function authorizePage(request, env) {
-  const authRequest = await env.OAUTH_PROVIDER.parseAuthRequest(request);
+  let authRequest;
+  try {
+    authRequest = await env.OAUTH_PROVIDER.parseAuthRequest(request);
+  } catch {
+    return new Response("Invalid OAuth authorization request", { status: 400 });
+  }
   const client = await env.OAUTH_PROVIDER.lookupClient(authRequest.clientId);
   if (!client) return new Response("Unknown OAuth client", { status: 400 });
 
@@ -173,11 +204,7 @@ async function startGithubAuthorization(request, env) {
   const state = crypto.randomUUID();
   await env.OAUTH_KV.put(`oauth:github:${state}`, authRequestJson, { expirationTtl: 600 });
   const callback = `${new URL(request.url).origin}/github/callback`;
-  const github = new URL("https://github.com/login/oauth/authorize");
-  github.searchParams.set("client_id", env.GITHUB_OAUTH_CLIENT_ID);
-  github.searchParams.set("redirect_uri", callback);
-  github.searchParams.set("scope", env.GITHUB_OAUTH_SCOPE ?? "read:user repo");
-  github.searchParams.set("state", state);
+  const github = githubUserAuthorizationUrl(env, callback, state);
   return Response.redirect(github, 302);
 }
 
@@ -192,18 +219,12 @@ async function completeGithubAuthorization(request, env) {
   await env.OAUTH_KV.delete(`oauth:github:${state}`);
 
   const callback = `${url.origin}/github/callback`;
-  const tokenResponse = await fetch("https://github.com/login/oauth/access_token", {
-    method: "POST",
-    headers: { accept: "application/json", "content-type": "application/json" },
-    body: JSON.stringify({
-      client_id: env.GITHUB_OAUTH_CLIENT_ID,
-      client_secret: env.GITHUB_OAUTH_CLIENT_SECRET,
-      code,
-      redirect_uri: callback,
-    }),
-  });
-  const token = await tokenResponse.json();
-  if (!token.access_token) return new Response("GitHub token exchange failed", { status: 502 });
+  let token;
+  try {
+    token = await exchangeGitHubUserCode(env, code, callback);
+  } catch {
+    return new Response("GitHub token exchange failed", { status: 502 });
+  }
 
   const profile = await fetch("https://api.github.com/user", {
     headers: {
@@ -222,8 +243,8 @@ async function completeGithubAuthorization(request, env) {
     props: {
       githubUserId: profile.id,
       githubLogin: profile.login,
-      githubAccessToken: token.access_token,
       oauthScopes: grantedScopes,
+      ...githubUserTokenProps(token),
     },
   });
   return Response.redirect(authorization.redirectTo, 302);

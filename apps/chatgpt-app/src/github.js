@@ -3,7 +3,7 @@ const API_VERSION = "2022-11-28";
 
 export async function dispatchWorkflow(env, task) {
   const token = await installationToken(env);
-  const [owner, repository] = env.GITHUB_RUNNER_REPOSITORY.split("/");
+  const [owner, repository] = runnerRepository(env);
   const workflow = env.GITHUB_WORKFLOW_ID ?? "execute-task.yml";
   const response = await githubFetch(
     `/repos/${owner}/${repository}/actions/workflows/${workflow}/dispatches`,
@@ -31,7 +31,7 @@ export async function dispatchWorkflow(env, task) {
 export async function cancelWorkflow(env, task) {
   if (!task.runId) return;
   const token = await installationToken(env);
-  const [owner, repository] = env.GITHUB_RUNNER_REPOSITORY.split("/");
+  const [owner, repository] = runnerRepository(env);
   const response = await githubFetch(
     `/repos/${owner}/${repository}/actions/runs/${encodeURIComponent(task.runId)}/cancel`,
     token,
@@ -67,15 +67,36 @@ export async function authorizeRepository(repo, props, mode, ref) {
 
 async function installationToken(env) {
   const appJwt = await signAppJwt(env.GITHUB_APP_ID, env.GITHUB_APP_PRIVATE_KEY);
-  const response = await fetch(
-    `${API}/app/installations/${env.GITHUB_APP_INSTALLATION_ID}/access_tokens`,
+  const [owner, repository] = runnerRepository(env);
+  const installationResponse = await githubFetch(
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repository)}/installation`,
+    appJwt,
+  );
+  if (!installationResponse.ok) {
+    throw new Error(
+      `GitHub App installation lookup failed with ${installationResponse.status}`,
+    );
+  }
+  const installationId = (await installationResponse.json()).id;
+  if (!installationId) throw new Error("GitHub App installation lookup returned no ID");
+
+  const response = await githubFetch(
+    `/app/installations/${encodeURIComponent(installationId)}/access_tokens`,
+    appJwt,
     {
       method: "POST",
-      headers: githubHeaders(appJwt),
+      body: JSON.stringify({
+        repositories: [repository],
+        permissions: { actions: "write" },
+      }),
     },
   );
   if (!response.ok) throw new Error(`GitHub App token request failed with ${response.status}`);
   return (await response.json()).token;
+}
+
+function runnerRepository(env) {
+  return env.GITHUB_RUNNER_REPOSITORY.split("/");
 }
 
 async function githubFetch(path, token, options = {}) {

@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import { generateKeyPairSync } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test, { afterEach } from "node:test";
 
-import { authorizeRepository } from "../apps/chatgpt-app/src/github.js";
+import {
+  authorizeRepository,
+  dispatchWorkflow,
+} from "../apps/chatgpt-app/src/github.js";
 
 const originalFetch = globalThis.fetch;
 
@@ -71,6 +75,55 @@ test("edit mode does not require a branch-only ref", async () => {
   assert.deepEqual(requests, ["https://api.github.com/repos/owner/project"]);
 });
 
+test("workflow dispatch resolves the App installation from the runner repository", async () => {
+  const requests = [];
+  globalThis.fetch = async (url, init = {}) => {
+    requests.push({ url: String(url), init });
+    if (String(url).endsWith("/repos/weavertech-group/runner/installation")) {
+      return Response.json({ id: 987654 });
+    }
+    if (String(url).endsWith("/app/installations/987654/access_tokens")) {
+      return Response.json({ token: "installation-token" });
+    }
+    if (String(url).endsWith("/actions/workflows/execute-task.yml/dispatches")) {
+      return new Response(null, { status: 204 });
+    }
+    return new Response("unexpected request", { status: 500 });
+  };
+
+  await dispatchWorkflow(
+    {
+      GITHUB_APP_ID: "4385224",
+      GITHUB_APP_PRIVATE_KEY: testPrivateKeyPem(),
+      GITHUB_RUNNER_REPOSITORY: "weavertech-group/runner",
+      GITHUB_WORKFLOW_ID: "execute-task.yml",
+      GITHUB_RUNNER_REF: "main",
+    },
+    {
+      id: "task-123",
+      repo: "weavertech-group/target",
+      ref: "main",
+      executor: "codex",
+      mode: "analyze",
+    },
+  );
+
+  assert.deepEqual(
+    requests.map(({ url }) => url),
+    [
+      "https://api.github.com/repos/weavertech-group/runner/installation",
+      "https://api.github.com/app/installations/987654/access_tokens",
+      "https://api.github.com/repos/weavertech-group/runner/actions/workflows/execute-task.yml/dispatches",
+    ],
+  );
+  assert.match(requests[0].init.headers.authorization, /^Bearer [^.]+\.[^.]+\.[^.]+$/);
+  assert.deepEqual(JSON.parse(requests[1].init.body), {
+    repositories: ["runner"],
+    permissions: { actions: "write" },
+  });
+  assert.equal(requests[2].init.headers.authorization, "Bearer installation-token");
+});
+
 test("workflow skips delivery steps when an executor produces no changes", async () => {
   const workflow = await readFile(
     new URL("../.github/workflows/execute-task.yml", import.meta.url),
@@ -89,6 +142,51 @@ test("workflow skips delivery steps when an executor produces no changes", async
   assert.match(workflow, /summary="No changes produced\."/);
 });
 
+test("Codex executor uses the pinned Codex Action with forwarding credentials", async () => {
+  const workflow = await readFile(
+    new URL("../.github/workflows/execute-task.yml", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    workflow,
+    /uses: openai\/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56/,
+  );
+  assert.match(workflow, /openai-api-key: \$\{\{ secrets\.CODEX_API_KEY \}\}/);
+  assert.match(
+    workflow,
+    /responses-api-endpoint: \$\{\{ secrets\.CODEX_RESPONSES_API_ENDPOINT \}\}/,
+  );
+  assert.match(workflow, /prompt-file: \$\{\{ runner\.temp \}\}\/task\.prompt/);
+  assert.match(workflow, /working-directory: target-workspace/);
+  assert.match(workflow, /permission-profile: ":workspace"/);
+  assert.match(workflow, /allow-bot-users: "weavertaskrunner\[bot\]"/);
+  assert.doesNotMatch(workflow, /allow-bots:/);
+  assert.doesNotMatch(workflow, /OPENAI_API_KEY|chatgpt\.com\/codex\/install\.sh/);
+});
+
+test("Cloudflare credential template documents the deployment permission boundary", async () => {
+  const template = await readFile(
+    new URL("../.secrets.env.example", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(template, /^CLOUDFLARE_API_TOKEN=$/m);
+  assert.match(template, /^CLOUDFLARE_ACCOUNT_ID=$/m);
+  assert.match(template, /Workers Scripts: Edit/);
+  assert.match(template, /Workers KV Storage: Edit/);
+  assert.match(template, /Account Settings: Read/);
+  assert.doesNotMatch(template, /cf[a-z]+_[A-Za-z0-9_-]+/);
+
+  const assignments = [...template.matchAll(/^([A-Z][A-Z0-9_]*)=/gm)].map(
+    ([, name]) => name,
+  );
+  assert.deepEqual(assignments, [
+    "CLOUDFLARE_API_TOKEN",
+    "CLOUDFLARE_ACCOUNT_ID",
+  ]);
+});
+
 test("submit_task records a failed state when workflow dispatch fails", async () => {
   const source = await readFile(
     new URL("../apps/chatgpt-app/src/mcp.js", import.meta.url),
@@ -98,3 +196,29 @@ test("submit_task records a failed state when workflow dispatch fails", async ()
   assert.match(source, /await dispatchWorkflow\(env, task\);/);
   assert.match(source, /status: "failed",\n\s+error: "workflow dispatch failed"/);
 });
+
+test("invalid OAuth authorization requests return a safe client error", async () => {
+  const source = await readFile(
+    new URL("../apps/chatgpt-app/src/index.js", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    source,
+    /try \{\n\s+authRequest = await env\.OAUTH_PROVIDER\.parseAuthRequest\(request\);\n\s+\} catch \{\n\s+return new Response\("Invalid OAuth authorization request", \{ status: 400 \}\);/,
+  );
+});
+
+function testPrivateKeyPem() {
+  return generateKeyPairSync("rsa", {
+    modulusLength: 2048,
+    privateKeyEncoding: {
+      type: "pkcs8",
+      format: "pem",
+    },
+    publicKeyEncoding: {
+      type: "spki",
+      format: "pem",
+    },
+  }).privateKey;
+}

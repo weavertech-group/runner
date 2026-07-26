@@ -21,7 +21,7 @@ ChatGPT code-task app 另有一个稳定的 Cloudflare Worker 控制面。Worker
 Durable Object 中，并只向 GitHub Actions workflow 传递 task ID、仓库、ref、
 executor 和 mode。workflow 使用 GitHub Actions OIDC 访问一次性 callback
 接口；MCP 返回值只允许包含任务的非敏感元数据（任务 ID、仓库、ref、executor、mode、状态、时间和 run ID）、结果摘要、commit 和 PR URL。Worker
-的 GitHub App 私钥、OAuth client secret、目标仓库授权 token、prompt 和
+的 GitHub App 私钥、GitHub App client secret、目标仓库授权 token、prompt 和
 OIDC token 不得进入 workflow inputs、MCP structured content、日志、summary
 或 artifact。`TASK_CONTROL_PLANE_URL` 必须同时配置在 Worker 和 runner
 repository variables 中，并作为 OIDC audience 精确匹配。
@@ -41,8 +41,9 @@ repository variables 中，并作为 OIDC audience 精确匹配。
 | `LARK_CHAT_NAME` | Repository 或 Environment secret | 机器人所在目标群的精确名称 |
 | `GITHUB_APP_ID` | Worker secret 与 runner repository secret | 调度与目标仓库授权的 GitHub App |
 | `GITHUB_APP_PRIVATE_KEY` | Worker secret 与 runner repository secret | GitHub App 私钥；只在需要的 Worker/Action 中使用 |
-| `GITHUB_OAUTH_CLIENT_SECRET` | Worker secret | ChatGPT 用户授权回调使用的 GitHub OAuth 应用密钥 |
-| `OPENAI_API_KEY` | Runner repository secret | Codex executor，仅在对应步骤注入 |
+| `GITHUB_APP_CLIENT_SECRET` | Worker secret | GitHub App user-to-server 授权与 token 刷新 |
+| `CODEX_API_KEY` | Runner repository secret | Codex executor 的上游 bearer token，仅传给 Codex Action |
+| `CODEX_RESPONSES_API_ENDPOINT` | Runner repository secret | Codex executor 的完整 Responses endpoint，仅传给 Codex Action |
 | `ANTHROPIC_API_KEY` | Runner repository secret | Claude Code executor，仅在对应步骤注入 |
 | `XAI_API_KEY` | Runner repository secret | Grok Build executor，仅在对应步骤注入 |
 
@@ -88,9 +89,13 @@ Fork 不会继承上游的 repository/Environment secrets、Environment 审批�
 
 ## 供应链策略
 
-外部 GitHub Actions 固定到完整 commit SHA。运行时工具则刻意遵循一次性开发环境的当前上游入口：
+外部 GitHub Actions 固定到完整 commit SHA。ChatGPT code-task 的 Codex
+executor 使用固定 SHA 的 OpenAI 官方 Codex Action；未指定
+`codex-version`，因此 Action 内安装的 Codex CLI 仍遵循该 Action 的当前默认版本。
+其他运行时工具则刻意遵循一次性开发环境的当前上游入口：
 
-- Codex 和 Claude Code 使用各自官方安装器；
+- Private T3 Session 的 Codex 和 Claude Code 使用各自官方安装器；
+- ChatGPT code-task 的 Claude Code 使用官方安装器；
 - Grok Build 使用 xAI 官方 CLI 安装器；
 - Tailscale 使用官方 Linux 安装器；
 - cloudflared 使用 Cloudflare 官方软件源；
@@ -111,7 +116,8 @@ Fork 不会继承上游的 repository/Environment secrets、Environment 审批�
 [ ] Quick Tunnel 仍依赖 T3 应用层认证
 [ ] pairing URL 只进入 mode-0600 runner 文件和指定的不可转发 Lark 卡片，不进入日志、summary 或 artifact
 [ ] 官方工具安装入口已经复核
-[ ] ChatGPT Worker 的 OAuth KV、GitHub App installation ID 和控制面 URL 已配置
+[ ] ChatGPT Worker 的 OAuth KV、GitHub App client ID 和控制面 URL 已配置
+[ ] GitHub App 已安装到 `GITHUB_RUNNER_REPOSITORY`，且 Worker 可自动解析 installation
 [ ] Worker 与 runner repository 的 `TASK_CONTROL_PLANE_URL` 完全一致
 [ ] MCP 返回值未包含 prompt、OAuth token、App private key 或 OIDC token
 ```

@@ -97,18 +97,19 @@ jobs:
           task-id: ${{ env.TASK_ID }}
           output-file: ${{ runner.temp }}/task.prompt
 
-      - name: Install Codex
-        if: ${{ inputs.executor == 'codex' }}
-        shell: bash
-        run: curl -fsSL https://chatgpt.com/codex/install.sh | sh
-
       - name: Run Codex
         if: ${{ inputs.executor == 'codex' }}
-        shell: bash
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        working-directory: target-workspace
-        run: codex exec --full-auto "$(< "$RUNNER_TEMP/task.prompt")"
+        uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56 # v1
+        with:
+          openai-api-key: ${{ secrets.CODEX_API_KEY }}
+          responses-api-endpoint: ${{ secrets.CODEX_RESPONSES_API_ENDPOINT }}
+          model: gpt-5.3-codex-spark
+          prompt-file: ${{ runner.temp }}/task.prompt
+          working-directory: target-workspace
+          permission-profile: ":workspace"
+          safety-strategy: drop-sudo
+          allow-bot-users: "weavertaskrunner[bot]"
+          codex-args: '["--ephemeral"]'
 
       - name: Install Claude Code
         if: ${{ inputs.executor == 'claude' }}

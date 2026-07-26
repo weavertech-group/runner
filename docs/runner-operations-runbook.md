@@ -41,6 +41,6 @@ runner is cancelled and cannot run after the runner itself disappears.
 bash tests/workflow-security.test.sh
 node --test tests/lark-session.test.js
 node --test tests/await-log.test.js
-shellcheck --severity=bash tests/*.sh
+shellcheck --severity=warning tests/*.sh
 actionlint
 ```
