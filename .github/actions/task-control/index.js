@@ -36,7 +36,7 @@ main().catch((error) => {
 });
 
 function input(name) {
-  return process.env[`INPUT_${name.toUpperCase().replaceAll("-", "_")}`] ?? "";
+  return process.env[`INPUT_${name.toUpperCase()}`] ?? "";
 }
 
 async function getOidcToken(audience) {
