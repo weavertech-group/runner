@@ -23,14 +23,14 @@
   "kv_namespaces": [
     {
       "binding": "OAUTH_KV",
-      "id": "REPLACE_WITH_OAUTH_KV_NAMESPACE_ID"
+      "id": "64bbcdb21ec14e2ba1c93be3c8f537a4"
     }
   ],
   "vars": {
     "GITHUB_RUNNER_REPOSITORY": "weavertech-group/runner",
     "GITHUB_WORKFLOW_ID": "execute-task.yml",
     "GITHUB_RUNNER_REF": "main",
-    "GITHUB_APP_CLIENT_ID": "REPLACE_WITH_GITHUB_APP_CLIENT_ID",
-    "TASK_CONTROL_PLANE_URL": "https://runner.example.com"
+    "GITHUB_APP_CLIENT_ID": "Iv23liSTFd2ASGA4MmkF",
+    "TASK_CONTROL_PLANE_URL": "https://weavergroup-runner-control-plane.ron-huafeng.workers.dev"
   }
 }
