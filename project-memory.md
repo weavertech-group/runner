@@ -9,6 +9,7 @@
 ## 文档索引
 
 - [ChatGPT code-task app](docs/chatgpt-app.md)：控制面、OAuth、GitHub App 与部署配置。
+- [ADR 0001](docs/adr/0001-oauth-kv-task-durable-objects.md)：OAuth KV 与 task Durable Object 的存储边界及重新评审条件。
 - [ChatGPT app acceptance memory](docs/chatgpt-app-acceptance.md)：当前验收状态和未完成的外部验证。
 - [Runner operations runbook](docs/runner-operations-runbook.md)：临时 runner 的操作与验证。
 - [Lark session card](docs/lark-reporting.md)：Lark webhook、可更新卡片与连接信息。
@@ -16,7 +17,7 @@
 
 ## 已验证事实
 
-证据最近复核于 2026-07-25；条目中另有说明时以条目边界为准。
+证据最近复核于 2026-07-26；条目中另有说明时以条目边界为准。
 
 | 事实 | 证据与适用边界 | 对实现或验收的影响 |
 | --- | --- | --- |
@@ -29,4 +30,5 @@
 | 固定版本的 `openai/codex-action` 中，`allow-bots` 只信任 `github-actions[bot]`；自定义 GitHub App actor 必须通过 `allow-bot-users` 精确列出。 | 已检查当前固定 SHA 的 Action 权限判断源码，并通过 App JWT 确认当前 App slug；workflow 契约测试固定了对应的 `<app-slug>[bot]`。 | Worker 使用 App installation token dispatch workflow 时，不能只配置 `allow-bots: true`，否则 Codex 会在 actor 权限检查阶段被拒绝。 |
 | Cloudflare user API token 与 account API token 使用不同的验证入口。 | 已验证并记录在 [ChatGPT code-task app](docs/chatgpt-app.md)：`cfut_` 使用 `/user/tokens/verify`，`cfat_` 使用 `/accounts/{account_id}/tokens/verify`。 | 错误 ownership endpoint 返回的 `401` 不能证明 token 无效；`active` 也不能证明 token 具备部署所需的全部权限。 |
 | 当前本地 Cloudflare 部署只需要一个 `CLOUDFLARE_API_TOKEN`。 | Worker/KV 部署均使用 Wrangler 的标准 token 变量；仓库没有 Billing、D1、Access 或 route-profile API 调用，Cloudflare 也建议部署过程持续使用同一个具备所需权限的 token。 | `.secrets.env` 不按 Cloudflare API 拆分 token；`CLOUDFLARE_ACCOUNT_ID` 只是目标账户标识。自定义域名或新增 Cloudflare 产品时重新评审权限。 |
+| OAuth 与 task 使用不同存储是有意的边界，不是为了统一技术栈而遗漏 D1。 | 当前 `@cloudflare/workers-oauth-provider` 要求 `OAUTH_KV`，并负责 token hash、grant props 加密、过期和撤销；task 则由每 task 一个 Durable Object 串行处理 callback、取消和结果更新。权衡记录在 [ADR 0001](docs/adr/0001-oauth-kv-task-durable-objects.md)。 | 当前不需要 D1 权限。只有出现立即全局撤销、关系型授权查询、完整审计报表，或上游提供事务型 storage adapter 时才重新评审。 |
 | 本地 GitHub App 私钥文件 `*.private-key.pem` 已被忽略。 | `git check-ignore` 将本地私钥文件匹配到仓库 `.gitignore` 规则；未读取私钥内容。 | 私钥不得进入 tracked files、文档、日志、summary 或 artifact。 |
