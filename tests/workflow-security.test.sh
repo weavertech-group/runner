@@ -71,8 +71,15 @@ grep -Fq 'ACTIONS_ID_TOKEN_REQUEST_URL' "$CONTROL_SCRIPT" || \
   fail 'task-control action must obtain a GitHub OIDC token'
 grep -Fq '::add-mask::' "$CONTROL_SCRIPT" || \
   fail 'task-control action must mask its callback token'
-if grep -Fq 'GITHUB_APP_PRIVATE_KEY: ${{ secrets.GITHUB_APP_PRIVATE_KEY }}' "$TASK_WORKFLOW"; then
+if grep -Fq 'GITHUB_APP_PRIVATE_KEY: ${{ secrets.RUNNER_GITHUB_APP_PRIVATE_KEY }}' "$TASK_WORKFLOW"; then
   fail 'GitHub App private key must not be job-wide executor environment'
+fi
+grep -Fq 'app-id: ${{ secrets.RUNNER_GITHUB_APP_ID }}' "$TASK_WORKFLOW" || \
+  fail 'task workflow must use a configurable GitHub App ID secret'
+grep -Fq 'private-key: ${{ secrets.RUNNER_GITHUB_APP_PRIVATE_KEY }}' "$TASK_WORKFLOW" || \
+  fail 'task workflow must use a configurable GitHub App private-key secret'
+if rg -q 'secrets[.]GITHUB_' "$TASK_WORKFLOW"; then
+  fail 'custom Actions secrets cannot use the reserved GITHUB_ prefix'
 fi
 grep -Fq 'https://x.ai/cli/install.sh' "$TASK_WORKFLOW" || \
   fail 'task workflow must use the official Grok Build installer'

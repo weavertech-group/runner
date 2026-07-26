@@ -39,8 +39,10 @@ repository variables 中，并作为 OIDC audience 精确匹配。
 | `LARK_APP_ID` | Repository 或 Environment secret | Lark 自建应用 ID |
 | `LARK_APP_SECRET` | Repository 或 Environment secret | Lark 自建应用密钥 |
 | `LARK_CHAT_NAME` | Repository 或 Environment secret | 机器人所在目标群的精确名称 |
-| `GITHUB_APP_ID` | Worker secret 与 runner repository secret | 调度与目标仓库授权的 GitHub App |
-| `GITHUB_APP_PRIVATE_KEY` | Worker secret 与 runner repository secret | GitHub App 私钥；只在需要的 Worker/Action 中使用 |
+| `GITHUB_APP_ID` | Worker secret | 调度 workflow 的 GitHub App |
+| `GITHUB_APP_PRIVATE_KEY` | Worker secret | 调度 workflow 的 GitHub App 私钥 |
+| `RUNNER_GITHUB_APP_ID` | Runner repository secret | 目标仓库授权使用的同一个 GitHub App；避开 GitHub 保留的 `GITHUB_` secret 前缀 |
+| `RUNNER_GITHUB_APP_PRIVATE_KEY` | Runner repository secret | 目标仓库授权使用的 GitHub App 私钥；只注入 token 创建 Action |
 | `GITHUB_APP_CLIENT_SECRET` | Worker secret | GitHub App user-to-server 授权与 token 刷新 |
 | `CODEX_API_KEY` | Runner repository secret | Codex executor 的上游 bearer token，仅传给 Codex Action |
 | `CODEX_RESPONSES_API_ENDPOINT` | Runner repository secret | Codex executor 的完整 Responses endpoint，仅传给 Codex Action |

@@ -98,12 +98,16 @@ content, logs, summaries, or artifacts.
 The GitHub App needs `Actions: write` on the runner repository so the Worker
 can dispatch the workflow. The same App must be installed on target
 repositories with the contents and pull-request permissions required by the
-selected task mode. The workflow also needs the App ID and private key as
-runner-repository secrets. The Codex executor uses the pinned official Codex
-Action with `CODEX_API_KEY` and the full Responses endpoint in
-`CODEX_RESPONSES_API_ENDPOINT`. Put `ANTHROPIC_API_KEY` and `XAI_API_KEY` there
-for the other executors you enable. These credentials are scoped to their
-individual workflow steps and are not needed by the Worker.
+selected task mode. The workflow also needs the App ID as
+`RUNNER_GITHUB_APP_ID` and the private key as
+`RUNNER_GITHUB_APP_PRIVATE_KEY` in runner-repository secrets. GitHub reserves
+the `GITHUB_` prefix, so these Actions secret names intentionally differ from
+the Worker's `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` bindings. The Codex
+executor uses the pinned official Codex Action with `CODEX_API_KEY` and the
+full Responses endpoint in `CODEX_RESPONSES_API_ENDPOINT`. Put
+`ANTHROPIC_API_KEY` and `XAI_API_KEY` there for the other executors you enable.
+These credentials are scoped to their individual workflow steps and are not
+needed by the Worker.
 
 The Worker resolves the App installation from `GITHUB_RUNNER_REPOSITORY` before
 each dispatch, then requests an installation token limited to that repository

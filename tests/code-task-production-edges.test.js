@@ -165,6 +165,17 @@ test("Codex executor uses the pinned Codex Action with forwarding credentials", 
   assert.doesNotMatch(workflow, /OPENAI_API_KEY|chatgpt\.com\/codex\/install\.sh/);
 });
 
+test("runner GitHub App credentials avoid GitHub's reserved secret prefix", async () => {
+  const workflow = await readFile(
+    new URL("../.github/workflows/execute-task.yml", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(workflow, /secrets\.RUNNER_GITHUB_APP_ID/);
+  assert.match(workflow, /secrets\.RUNNER_GITHUB_APP_PRIVATE_KEY/);
+  assert.doesNotMatch(workflow, /secrets\.GITHUB_APP_/);
+});
+
 test("Cloudflare credential template documents the deployment permission boundary", async () => {
   const template = await readFile(
     new URL("../.secrets.env.example", import.meta.url),
