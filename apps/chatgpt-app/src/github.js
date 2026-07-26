@@ -110,10 +110,11 @@ async function githubFetch(path, token, options = {}) {
   });
 }
 
-function githubHeaders(token) {
+export function githubHeaders(token) {
   return {
     accept: "application/vnd.github+json",
     authorization: `Bearer ${token}`,
+    "user-agent": "WeaverTaskRunner",
     "x-github-api-version": API_VERSION,
   };
 }

@@ -6,22 +6,13 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 
 import {
-  exchangeGitHubUserCode,
+  completeGitHubUserAuthorization,
   githubGrantTokenExchange,
   githubUserAuthorizationUrl,
-  githubUserTokenProps,
+  OAUTH_SCOPES,
 } from "./github-user-auth.js";
 import { handleMcpRequest } from "./mcp.js";
 import { TaskObject } from "./task-object.js";
-
-const OAUTH_SCOPES = [
-  "tasks:read",
-  "tasks:run",
-  "tasks:cancel",
-  "repos:read",
-  "repos:write",
-  "pull_requests:write",
-];
 
 export { TaskObject };
 
@@ -86,7 +77,7 @@ async function defaultFetch(request, env) {
   }
 
   if (url.pathname === "/github/callback" && request.method === "GET") {
-    return completeGithubAuthorization(request, env);
+    return completeGitHubUserAuthorization(request, env);
   }
 
   return new Response("Not found", { status: 404 });
@@ -206,48 +197,6 @@ async function startGithubAuthorization(request, env) {
   const callback = `${new URL(request.url).origin}/github/callback`;
   const github = githubUserAuthorizationUrl(env, callback, state);
   return Response.redirect(github, 302);
-}
-
-async function completeGithubAuthorization(request, env) {
-  const url = new URL(request.url);
-  const state = url.searchParams.get("state");
-  const code = url.searchParams.get("code");
-  if (!state || !code) return new Response("GitHub authorization was not completed", { status: 400 });
-
-  const authRequestJson = await env.OAUTH_KV.get(`oauth:github:${state}`);
-  if (!authRequestJson) return new Response("Expired GitHub authorization state", { status: 400 });
-  await env.OAUTH_KV.delete(`oauth:github:${state}`);
-
-  const callback = `${url.origin}/github/callback`;
-  let token;
-  try {
-    token = await exchangeGitHubUserCode(env, code, callback);
-  } catch {
-    return new Response("GitHub token exchange failed", { status: 502 });
-  }
-
-  const profile = await fetch("https://api.github.com/user", {
-    headers: {
-      accept: "application/vnd.github+json",
-      authorization: `Bearer ${token.access_token}`,
-      "x-github-api-version": "2022-11-28",
-    },
-  }).then((response) => response.json());
-  const authRequest = JSON.parse(authRequestJson);
-  const grantedScopes = authRequest.scope.filter((scope) => OAUTH_SCOPES.includes(scope));
-  const authorization = await env.OAUTH_PROVIDER.completeAuthorization({
-    request: authRequest,
-    userId: `github:${profile.id}`,
-    metadata: { githubLogin: profile.login },
-    scope: grantedScopes,
-    props: {
-      githubUserId: profile.id,
-      githubLogin: profile.login,
-      oauthScopes: grantedScopes,
-      ...githubUserTokenProps(token),
-    },
-  });
-  return Response.redirect(authorization.redirectTo, 302);
 }
 
 function html(title, body, setCookie) {

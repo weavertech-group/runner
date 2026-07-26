@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  completeGitHubUserAuthorization,
   exchangeGitHubUserCode,
   githubGrantTokenExchange,
   githubUserAuthorizationUrl,
@@ -69,6 +70,155 @@ test("GitHub App callback exchanges its code with the app client credentials", a
   );
   assert.equal(token.access_token, "ghu_access");
   assert.equal(token.refresh_token, "ghr_refresh");
+});
+
+test("GitHub callback completes OAuth with a delimiter-safe user id", async () => {
+  const authRequest = {
+    responseType: "code",
+    clientId: "client-123",
+    redirectUri: "https://client.example/callback",
+    scope: ["tasks:read"],
+    state: "client-state",
+    codeChallenge: "challenge",
+    codeChallengeMethod: "S256",
+  };
+  let completedAuthorization;
+  let profileRequest;
+  const response = await completeGitHubUserAuthorization(
+    new Request(
+      "https://runner.example.com/github/callback?state=github-state&code=github-code",
+    ),
+    {
+      GITHUB_APP_CLIENT_ID: "Iv1.example",
+      GITHUB_APP_CLIENT_SECRET: "client-secret",
+      OAUTH_KV: {
+        get: async () => JSON.stringify(authRequest),
+        delete: async () => {},
+      },
+      OAUTH_PROVIDER: {
+        completeAuthorization: async (authorization) => {
+          completedAuthorization = authorization;
+          return {
+            redirectTo:
+              "https://client.example/callback?code=github-123%3Agrant%3Asecret",
+          };
+        },
+      },
+    },
+    async (url, init) => {
+      if (url === "https://github.com/login/oauth/access_token") {
+        return Response.json({ access_token: "ghu_access" });
+      }
+      if (url === "https://api.github.com/user") {
+        profileRequest = init;
+        return Response.json({ id: 123, login: "octocat" });
+      }
+      return new Response("unexpected request", { status: 500 });
+    },
+  );
+
+  assert.equal(response.status, 302);
+  assert.equal(completedAuthorization.userId, "github-123");
+  assert.deepEqual(completedAuthorization.metadata, {
+    githubLogin: "octocat",
+  });
+  assert.equal(completedAuthorization.props.githubUserId, 123);
+  assert.equal(completedAuthorization.props.githubLogin, "octocat");
+  assert.equal(profileRequest.headers["user-agent"], "WeaverTaskRunner");
+});
+
+test("GitHub callback rejects a non-JSON profile error before creating a grant", async () => {
+  let completedAuthorization = false;
+  const response = await completeGitHubUserAuthorization(
+    new Request(
+      "https://runner.example.com/github/callback?state=github-state&code=github-code",
+    ),
+    {
+      GITHUB_APP_CLIENT_ID: "Iv1.example",
+      GITHUB_APP_CLIENT_SECRET: "client-secret",
+      OAUTH_KV: {
+        get: async () =>
+          JSON.stringify({
+            responseType: "code",
+            clientId: "client-123",
+            redirectUri: "https://client.example/callback",
+            scope: ["tasks:read"],
+          }),
+        delete: async () => {},
+      },
+      OAUTH_PROVIDER: {
+        completeAuthorization: async () => {
+          completedAuthorization = true;
+          return { redirectTo: "https://client.example/callback" };
+        },
+      },
+    },
+    async (url) => {
+      if (url === "https://github.com/login/oauth/access_token") {
+        return Response.json({ access_token: "ghu_access" });
+      }
+      return new Response("User-Agent header required", {
+        status: 403,
+        headers: { "content-type": "text/html; charset=utf-8" },
+      });
+    },
+  );
+
+  assert.equal(response.status, 502);
+  assert.equal(await response.text(), "GitHub profile lookup failed");
+  assert.equal(completedAuthorization, false);
+});
+
+test("GitHub callback reports grant completion failures without exposing credentials", async () => {
+  const logEntries = [];
+  const response = await completeGitHubUserAuthorization(
+    new Request(
+      "https://runner.example.com/github/callback?state=github-state&code=github-code",
+    ),
+    {
+      GITHUB_APP_CLIENT_ID: "Iv1.example",
+      GITHUB_APP_CLIENT_SECRET: "client-secret",
+      OAUTH_KV: {
+        get: async () =>
+          JSON.stringify({
+            responseType: "code",
+            clientId: "client-123",
+            redirectUri: "https://client.example/callback",
+            scope: ["tasks:read"],
+          }),
+        delete: async () => {},
+      },
+      OAUTH_PROVIDER: {
+        completeAuthorization: async () => {
+          throw new Error("KV grant write failed");
+        },
+      },
+    },
+    async (url) => {
+      if (url === "https://github.com/login/oauth/access_token") {
+        return Response.json({
+          access_token: "ghu_sensitive_access",
+          refresh_token: "ghr_sensitive_refresh",
+        });
+      }
+      return Response.json({ id: 123, login: "octocat" });
+    },
+    {
+      error(...values) {
+        logEntries.push(values);
+      },
+    },
+  );
+
+  assert.equal(response.status, 502);
+  assert.equal(await response.text(), "OAuth grant creation failed");
+  assert.equal(logEntries.length, 1);
+  assert.equal(logEntries[0][0], "GitHub OAuth grant completion failed");
+  const serializedLog = JSON.stringify(logEntries);
+  assert.doesNotMatch(
+    serializedLog,
+    /github-state|github-code|ghu_sensitive_access|ghr_sensitive_refresh/,
+  );
 });
 
 test("refreshing the MCP grant rotates the GitHub App user token", async () => {
